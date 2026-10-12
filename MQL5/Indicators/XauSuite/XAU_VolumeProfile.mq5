@@ -23,6 +23,13 @@
 
 #include <XauSuite/XauSuite.mqh>
 
+//--- legend quick-settings switches
+#define OPT_PROFILE 0
+#define OPT_SPLIT   1
+#define OPT_LEVELS  2
+#define OPT_PREVDAY 3
+#define OPT_VASHADE 4
+
 enum ENUM_XAU_PROFILE_RANGE
   {
    XAU_RANGE_LOOKBACK=0, // Fixed lookback (bars)
@@ -63,6 +70,8 @@ CXauCanvas g_front;
 CXauMap    g_map;
 CXauGate   g_gate;
 int        g_total=0;
+CXauUI     g_ui;
+double     g_theme_ver=0.0;
 double     g_o[],g_h[],g_l[],g_c[],g_v[];
 //--- last built profile
 double     g_up[],g_dn[];
@@ -86,6 +95,13 @@ int OnInit()
       PlotIndexSetDouble(p,PLOT_EMPTY_VALUE,EMPTY_VALUE);
    ArrayResize(g_up,MathMax(InpRows,2));
    ArrayResize(g_dn,MathMax(InpRows,2));
+   g_ui.Init("XAU Volume Profile",g_t.blue);
+   g_ui.Add("Profile histogram",true);
+   g_ui.Add("Split buy / sell volume",InpSplit);
+   g_ui.Add("POC / VAH / VAL lines",InpShowLevels);
+   g_ui.Add("Previous day levels",InpShowPrevDay);
+   g_ui.Add("Value area shading",true);
+   ReloadTheme();
    IndicatorSetString(INDICATOR_SHORTNAME,"XAU Volume Profile");
    IndicatorSetInteger(INDICATOR_DIGITS,_Digits);
    g_gate.Init(200);
@@ -95,6 +111,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_gate.Stop();
+   g_ui.Destroy();
    g_back.Destroy();
    g_front.Destroy();
    ChartRedraw();
@@ -229,7 +246,7 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
       if(new_day)
         {
          int ds=(int)BufDayStart[i-1];
-         if(InpShowPrevDay && ds>=0 && i-ds>1 && intraday && Build(ds,i-1,rows,InpVaPct))
+         if(ds>=0 && i-ds>1 && intraday && Build(ds,i-1,rows,InpVaPct))
            {
             BufPocRaw[i]=PocPrice();
             BufVahRaw[i]=VahPrice();
@@ -237,7 +254,7 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
            }
          BufDayStart[i]=i;
         }
-      bool hide=(new_day || !InpShowPrevDay);
+      bool hide=new_day;
       BufPoc[i]=(hide ? EMPTY_VALUE : BufPocRaw[i]);
       BufVah[i]=(hide ? EMPTY_VALUE : BufVahRaw[i]);
       BufVal[i]=(hide ? EMPTY_VALUE : BufValRaw[i]);
@@ -250,17 +267,41 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
 
 void OnTimer()
   {
+   if(XauThemeVersion()!=g_theme_ver)
+     {
+      ReloadTheme();
+      if(InpTheme==XAU_THEME_AUTO)
+         XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
    if(g_gate.Pending())
       Render();
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   int r=g_ui.OnEvent(id,lparam,dparam,sparam);
+   if((r&XUI_THEME)!=0)
+     {
+      ReloadTheme();
+      XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
+   if((r&XUI_VISUAL)!=0 || id==CHARTEVENT_CHART_CHANGE)
       Render();
   }
 
 //+------------------------------------------------------------------+
+//--- (re)load the theme; also called when the suite theme changes on any chart
+void ReloadTheme()
+  {
+   XauLoadTheme(InpTheme,g_t);
+   g_ui.SetTheme(g_t);
+   g_theme_ver=XauThemeVersion();
+  }
+
 void Render()
   {
    if(g_total<3)
@@ -272,13 +313,24 @@ void Render()
       return;
    if(!XBegin(g_back,"XAU.VolumeProfile.back",g_map,true) || !XBegin(g_front,"XAU.VolumeProfile.front",g_map,false))
       return;
+   g_ui.Draw(sub);
+   if(g_ui.Hidden())
+     {
+      g_back.Flush();
+      g_front.Flush();
+      ChartRedraw();
+      return;
+     }
    double k=g_front.K();
    int last=g_total-1;
 
    //--- previous day levels
-   XStrokeSeries(g_front,g_map,BufPoc,XRgb(g_t.gold,0.90),2.0);
-   XStrokeSeries(g_front,g_map,BufVah,XRgb(g_t.blue,0.80),1.0,5.0,4.0);
-   XStrokeSeries(g_front,g_map,BufVal,XRgb(g_t.blue,0.80),1.0,5.0,4.0);
+   if(g_ui.Opt(OPT_PREVDAY))
+     {
+      XStrokeSeries(g_front,g_map,BufPoc,XRgb(g_t.gold,0.90),2.0);
+      XStrokeSeries(g_front,g_map,BufVah,XRgb(g_t.blue,0.80),1.0,5.0,4.0);
+      XStrokeSeries(g_front,g_map,BufVal,XRgb(g_t.blue,0.80),1.0,5.0,4.0);
+     }
 
    //--- profile range
    int a,b;
@@ -306,9 +358,10 @@ void Render()
          max_total=MathMax(max_total,g_up[r]+g_dn[r]);
 
       //--- faint value-area backdrop across the range
-      g_back.FillRect(xl,g_map.Y(VahPrice()),xr,g_map.Y(ValPrice()),XRgb(g_t.blue,0.035));
+      if(g_ui.Opt(OPT_VASHADE))
+         g_back.FillRect(xl,g_map.Y(VahPrice()),xr,g_map.Y(ValPrice()),XRgb(g_t.blue,0.035));
 
-      if(max_total>0.0)
+      if(max_total>0.0 && g_ui.Opt(OPT_PROFILE))
         {
          for(int r=0; r<rows; r++)
            {
@@ -320,7 +373,7 @@ void Render()
             bool is_poc=(r==g_poc);
             double up_w=full_w*g_up[r]/max_total;
             double dn_w=full_w*g_dn[r]/max_total;
-            if(InpSplit)
+            if(g_ui.Opt(OPT_SPLIT))
               {
                uint cu=(is_poc ? XRgb(g_t.gold,0.85) : XRgb(g_t.bull,in_va ? 0.55 : 0.22));
                uint cd=(is_poc ? XRgb(g_t.gold,0.65) : XRgb(g_t.bear,in_va ? 0.55 : 0.22));
@@ -340,7 +393,7 @@ void Render()
            }
         }
 
-      if(InpShowLevels)
+      if(g_ui.Opt(OPT_LEVELS))
         {
          double poc=PocPrice(),vah=VahPrice(),val=ValPrice();
          g_front.Line(xl,g_map.Y(poc),xr,g_map.Y(poc),XRgb(g_t.gold,0.95),2.0);

@@ -29,6 +29,15 @@
 
 #include <XauSuite/XauSuite.mqh>
 
+//--- legend quick-settings switches
+#define OPT_HIST    0
+#define OPT_OBOS    1
+#define OPT_SIGNAL  2
+#define OPT_DIV     3
+#define OPT_HIDDEN  4
+#define OPT_DIVLINE 5
+#define OPT_GLOW    6
+
 input group "RSI"
 input ENUM_APPLIED_PRICE InpSource     = PRICE_CLOSE; // Source
 input int                InpRsiLen     = 14;    // RSI length
@@ -60,6 +69,8 @@ CXauCanvas g_front;
 CXauMap    g_map;
 CXauGate   g_gate;
 int        g_total=0;
+CXauUI     g_ui;
+double     g_theme_ver=0.0;
 uint       g_lut[256];
 uint       g_hcols[];
 
@@ -92,13 +103,15 @@ int OnInit()
       PlotIndexSetDouble(p,PLOT_EMPTY_VALUE,EMPTY_VALUE);
    PlotIndexSetInteger(0,PLOT_SHOW_DATA,false);
 
-   //--- RSI value gradient: bear at 0, neutral at 50, bull at 100 (lut[0] = top = 100)
-   uint bull=XRgb(g_t.bull,1.0),bear=XRgb(g_t.bear,1.0),neutral=XRgb(g_t.neutral,1.0);
-   for(int j=0; j<256; j++)
-     {
-      double f=1.0-j/255.0;
-      g_lut[j]=(f<0.5 ? XLerp(bear,neutral,f/0.5) : XLerp(neutral,bull,(f-0.5)/0.5));
-     }
+   g_ui.Init("XAU Momentum Matrix",g_t.violet);
+   g_ui.Add("MACD histogram",InpShowHist);
+   g_ui.Add("Overbought / oversold glow",true);
+   g_ui.Add("RSI signal line",true);
+   g_ui.Add("Divergences",true);
+   g_ui.Add("Hidden divergences",InpShowHidden);
+   g_ui.Add("Divergence lines",InpDivLines);
+   g_ui.Add("Glow",InpGlow);
+   ReloadTheme();
 
    IndicatorSetString(INDICATOR_SHORTNAME,"XAU Momentum Matrix");
    IndicatorSetInteger(INDICATOR_DIGITS,2);
@@ -109,6 +122,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_gate.Stop();
+   g_ui.Destroy();
    g_back.Destroy();
    g_front.Destroy();
    ChartRedraw();
@@ -199,7 +213,7 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
       double hmax=0.0;
       for(int j=MathMax(0,i-199); j<=i; j++)
          hmax=MathMax(hmax,MathAbs(BufHistRaw[j]));
-      BufHist[i]=(InpShowHist && hmax>0.0 && i>=InpMacdSlow ? 50.0+25.0*BufHistRaw[i]/hmax : EMPTY_VALUE);
+      BufHist[i]=(hmax>0.0 && i>=InpMacdSlow ? 50.0+25.0*BufHistRaw[i]/hmax : EMPTY_VALUE);
 
       //--- divergence state carried from the previous bar
       BufPLRsi[i]=(i>0 ? BufPLRsi[i-1] : EMPTY_VALUE);
@@ -236,7 +250,7 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
             if(price_low<BufPLPrice[i] && pl>BufPLRsi[i] && pl<50.0)
                type=1;
             else
-               if(InpShowHidden && price_low>BufPLPrice[i] && pl<BufPLRsi[i])
+               if(price_low>BufPLPrice[i] && pl<BufPLRsi[i])
                   type=2;
             if(type>0)
               {
@@ -262,7 +276,7 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
             if(price_high>BufPHPrice[i] && ph<BufPHRsi[i] && ph>50.0)
                type=1;
             else
-               if(InpShowHidden && price_high<BufPHPrice[i] && ph>BufPHRsi[i])
+               if(price_high<BufPHPrice[i] && ph>BufPHRsi[i])
                   type=2;
             if(type>0)
               {
@@ -284,17 +298,48 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
 
 void OnTimer()
   {
+   if(XauThemeVersion()!=g_theme_ver)
+     {
+      ReloadTheme();
+      if(InpTheme==XAU_THEME_AUTO)
+         XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
    if(g_gate.Pending())
       Render();
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   int r=g_ui.OnEvent(id,lparam,dparam,sparam);
+   if((r&XUI_THEME)!=0)
+     {
+      ReloadTheme();
+      XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
+   if((r&XUI_VISUAL)!=0 || id==CHARTEVENT_CHART_CHANGE)
       Render();
   }
 
 //+------------------------------------------------------------------+
+//--- (re)load the theme; also called when the suite theme changes on any chart
+void ReloadTheme()
+  {
+   XauLoadTheme(InpTheme,g_t);
+   g_ui.SetTheme(g_t);
+   g_theme_ver=XauThemeVersion();
+   //--- RSI value gradient: bear at 0, neutral at 50, bull at 100 (lut[0] = top = 100)
+   uint bull=XRgb(g_t.bull,1.0),bear=XRgb(g_t.bear,1.0),neutral=XRgb(g_t.neutral,1.0);
+   for(int j=0; j<256; j++)
+     {
+      double f=1.0-j/255.0;
+      g_lut[j]=(f<0.5 ? XLerp(bear,neutral,f/0.5) : XLerp(neutral,bull,(f-0.5)/0.5));
+     }
+  }
+
 uint LutAt(const double v)
   {
    int j=(int)MathRound((1.0-XClamp(v/100.0,0.0,1.0))*255.0);
@@ -306,7 +351,7 @@ void DrawDivergence(const int p,const int from,const double value,const int type
    uint rgb=(bull ? g_t.bull : g_t.bear);
    double a=(type==1 ? 1.0 : 0.6);
    double x=g_map.X(p),y=g_map.Y(value);
-   if(InpDivLines && from>=0 && from<g_total && XOk(BufRsi[from]))
+   if(g_ui.Opt(OPT_DIVLINE) && from>=0 && from<g_total && XOk(BufRsi[from]))
      {
       double x0=g_map.X(from),y0=g_map.Y(BufRsi[from]);
       if(type==1)
@@ -331,6 +376,14 @@ void Render()
       return;
    if(!XBegin(g_back,"XAU.Momentum.back",g_map,true) || !XBegin(g_front,"XAU.Momentum.front",g_map,false))
       return;
+   g_ui.Draw(sub);
+   if(g_ui.Hidden())
+     {
+      g_back.Flush();
+      g_front.Flush();
+      ChartRedraw();
+      return;
+     }
    double k=g_front.K();
    int from=g_map.From(),to=g_map.To();
    int last=g_total-1;
@@ -342,7 +395,7 @@ void Render()
    XLevel(g_back,g_map,50.0,XRgb(g_t.muted,0.35),1.0,1.5,3.0);
 
    //--- MACD histogram
-   if(InpShowHist)
+   if(g_ui.Opt(OPT_HIST))
      {
       if(ArraySize(g_hcols)!=g_total)
          ArrayResize(g_hcols,g_total);
@@ -359,19 +412,24 @@ void Render()
      }
 
    //--- overbought / oversold glow
-   XFillBeyond(g_back,g_map,BufRsi,InpObLevel,true,XRgb(g_t.bear,0.35),0.15);
-   XFillBeyond(g_back,g_map,BufRsi,InpOsLevel,false,XRgb(g_t.bull,0.35),0.15);
+   if(g_ui.Opt(OPT_OBOS))
+     {
+      XFillBeyond(g_back,g_map,BufRsi,InpObLevel,true,XRgb(g_t.bear,0.35),0.15);
+      XFillBeyond(g_back,g_map,BufRsi,InpOsLevel,false,XRgb(g_t.bull,0.35),0.15);
+     }
 
    //--- lines
-   XStrokeSeries(g_front,g_map,BufSignal,XRgb(g_t.silver,0.6),1.0);
-   XStrokeSeriesLut(g_front,g_map,BufRsi,g_lut,g_map.Y(100.0),g_map.Y(0.0),2.0,InpGlow ? 0.22 : 0.0);
+   if(g_ui.Opt(OPT_SIGNAL))
+      XStrokeSeries(g_front,g_map,BufSignal,XRgb(g_t.silver,0.6),1.0);
+   XStrokeSeriesLut(g_front,g_map,BufRsi,g_lut,g_map.Y(100.0),g_map.Y(0.0),2.0,g_ui.Opt(OPT_GLOW) ? 0.22 : 0.0);
 
    //--- divergences (lines may start left of the window, so look a little further back)
-   for(int p=MathMax(0,from-InpDivMaxBars); p<=to; p++)
+   bool show_hidden=g_ui.Opt(OPT_HIDDEN);
+   for(int p=MathMax(0,from-InpDivMaxBars); p<=to && g_ui.Opt(OPT_DIV); p++)
      {
-      if(BufBullType[p]>0.0 && XOk(BufBull[p]))
+      if(BufBullType[p]>0.0 && XOk(BufBull[p]) && (show_hidden || BufBullType[p]<1.5))
          DrawDivergence(p,(int)BufBullFrom[p],BufBull[p],(int)BufBullType[p],true);
-      if(BufBearType[p]>0.0 && XOk(BufBear[p]))
+      if(BufBearType[p]>0.0 && XOk(BufBear[p]) && (show_hidden || BufBearType[p]<1.5))
          DrawDivergence(p,(int)BufBearFrom[p],BufBear[p],(int)BufBearType[p],false);
      }
 

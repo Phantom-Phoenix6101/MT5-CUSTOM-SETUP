@@ -22,6 +22,15 @@
 
 #include <XauSuite/XauSuite.mqh>
 
+//--- legend quick-settings switches
+#define OPT_STRUCT 0
+#define OPT_SWINGS 1
+#define OPT_OB     2
+#define OPT_FVG    3
+#define OPT_EQ     4
+#define OPT_SWEEPS 5
+#define OPT_ZONES  6
+
 input group "Structure"
 input int            InpSwingLen     = 8;     // Swing length (bars each side)
 input bool           InpShowStruct   = true;  // Show BOS / CHoCH
@@ -79,6 +88,8 @@ CXauCanvas g_front;
 CXauMap    g_map;
 CXauGate   g_gate;
 int        g_total=0;
+CXauUI     g_ui;
+double     g_theme_ver=0.0;
 
 SmcZone  g_obs[];
 SmcZone  g_fvgs[];
@@ -140,6 +151,15 @@ int OnInit()
    SetIndexBuffer(2,BufAtr,INDICATOR_CALCULATIONS);
    PlotIndexSetDouble(0,PLOT_EMPTY_VALUE,EMPTY_VALUE);
    PlotIndexSetDouble(1,PLOT_EMPTY_VALUE,EMPTY_VALUE);
+   g_ui.Init("XAU Smart Money Concepts",g_t.violet);
+   g_ui.Add("BOS / CHoCH",InpShowStruct);
+   g_ui.Add("Swing labels (HH/HL/LH/LL)",InpShowSwings);
+   g_ui.Add("Order blocks",InpShowOB);
+   g_ui.Add("Fair value gaps",InpShowFVG);
+   g_ui.Add("Equal highs / lows",InpShowEq);
+   g_ui.Add("Liquidity sweeps",InpShowSweeps);
+   g_ui.Add("Premium / discount",InpShowZones);
+   ReloadTheme();
    IndicatorSetString(INDICATOR_SHORTNAME,"XAU Smart Money Concepts");
    IndicatorSetInteger(INDICATOR_DIGITS,_Digits);
    ResetState();
@@ -150,6 +170,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_gate.Stop();
+   g_ui.Destroy();
    g_back.Destroy();
    g_front.Destroy();
    ChartRedraw();
@@ -319,9 +340,8 @@ void ProcessBar(const int i,const double &open[],const double &high[],const doub
      {
       if(XOk(g_sh_price))
         {
-         if(InpShowSwings)
-            AddSwing(ph,p,ph>g_sh_price ? "HH" : "LH",true);
-         if(InpShowEq && tol>0.0 && MathAbs(ph-g_sh_price)<=tol)
+         AddSwing(ph,p,ph>g_sh_price ? "HH" : "LH",true);
+         if(tol>0.0 && MathAbs(ph-g_sh_price)<=tol)
             AddMark(g_eqs,g_eq_next,(ph+g_sh_price)*0.5,g_sh_idx,p,"EQH",true);
         }
       g_sh_price=ph;
@@ -333,9 +353,8 @@ void ProcessBar(const int i,const double &open[],const double &high[],const doub
      {
       if(XOk(g_sl_price))
         {
-         if(InpShowSwings)
-            AddSwing(pl,p,pl<g_sl_price ? "LL" : "HL",false);
-         if(InpShowEq && tol>0.0 && MathAbs(pl-g_sl_price)<=tol)
+         AddSwing(pl,p,pl<g_sl_price ? "LL" : "HL",false);
+         if(tol>0.0 && MathAbs(pl-g_sl_price)<=tol)
             AddMark(g_eqs,g_eq_next,(pl+g_sl_price)*0.5,g_sl_idx,p,"EQL",false);
         }
       g_sl_price=pl;
@@ -346,30 +365,22 @@ void ProcessBar(const int i,const double &open[],const double &high[],const doub
 
    if(!g_sh_broken && XOk(g_sh_price) && close[i]>g_sh_price)
      {
-      if(InpShowStruct)
-         AddMark(g_marks,g_mark_next,g_sh_price,g_sh_idx,i,g_trend<0 ? "CHoCH" : "BOS",true);
+      AddMark(g_marks,g_mark_next,g_sh_price,g_sh_idx,i,g_trend<0 ? "CHoCH" : "BOS",true);
       g_trend=1;
       g_sh_broken=true;
-      if(InpShowOB)
-        {
-         int k=FindObBar(g_sh_idx,true,i,open,high,low,close);
-         AddZone(g_obs,high[k],low[k],k,true);
-        }
+      int k=FindObBar(g_sh_idx,true,i,open,high,low,close);
+      AddZone(g_obs,high[k],low[k],k,true);
      }
    if(!g_sl_broken && XOk(g_sl_price) && close[i]<g_sl_price)
      {
-      if(InpShowStruct)
-         AddMark(g_marks,g_mark_next,g_sl_price,g_sl_idx,i,g_trend>0 ? "CHoCH" : "BOS",false);
+      AddMark(g_marks,g_mark_next,g_sl_price,g_sl_idx,i,g_trend>0 ? "CHoCH" : "BOS",false);
       g_trend=-1;
       g_sl_broken=true;
-      if(InpShowOB)
-        {
-         int k=FindObBar(g_sl_idx,false,i,open,high,low,close);
-         AddZone(g_obs,high[k],low[k],k,false);
-        }
+      int k=FindObBar(g_sl_idx,false,i,open,high,low,close);
+      AddZone(g_obs,high[k],low[k],k,false);
      }
 
-   if(InpShowFVG && i>2)
+   if(i>2)
      {
       double gap_min=(XOk(atr) ? InpFvgMinAtr*atr : 0.0);
       if(low[i]>high[i-2] && close[i-1]>high[i-2] && low[i]-high[i-2]>=gap_min)
@@ -402,7 +413,6 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
 
       //--- sweeps use the swing state as it was before this bar
       double sell=EMPTY_VALUE,buy=EMPTY_VALUE;
-      if(InpShowSweeps)
         {
          if(!g_sh_broken && !g_sh_swept && XOk(g_sh_price) && high[i]>g_sh_price && close[i]<g_sh_price)
             sell=high[i];
@@ -427,17 +437,41 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
 
 void OnTimer()
   {
+   if(XauThemeVersion()!=g_theme_ver)
+     {
+      ReloadTheme();
+      if(InpTheme==XAU_THEME_AUTO)
+         XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
    if(g_gate.Pending())
       Render();
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   int r=g_ui.OnEvent(id,lparam,dparam,sparam);
+   if((r&XUI_THEME)!=0)
+     {
+      ReloadTheme();
+      XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
+   if((r&XUI_VISUAL)!=0 || id==CHARTEVENT_CHART_CHANGE)
       Render();
   }
 
 //+------------------------------------------------------------------+
+//--- (re)load the theme; also called when the suite theme changes on any chart
+void ReloadTheme()
+  {
+   XauLoadTheme(InpTheme,g_t);
+   g_ui.SetTheme(g_t);
+   g_theme_ver=XauThemeVersion();
+  }
+
 void DrawZone(const SmcZone &z,const double right_x,const bool is_ob)
   {
    double k=g_back.K();
@@ -486,12 +520,20 @@ void Render()
       return;
    if(!XBegin(g_back,"XAU.SMC.back",g_map,true) || !XBegin(g_front,"XAU.SMC.front",g_map,false))
       return;
+   g_ui.Draw(sub);
+   if(g_ui.Hidden())
+     {
+      g_back.Flush();
+      g_front.Flush();
+      ChartRedraw();
+      return;
+     }
    int last=g_total-1;
    double k=g_front.K();
    double right_x=g_map.X(last+InpExtendBars);
 
    //--- premium / equilibrium / discount of the current dealing range
-   if(InpShowZones && XOk(g_sh_price) && XOk(g_sl_price) && g_sh_price>g_sl_price)
+   if(g_ui.Opt(OPT_ZONES) && XOk(g_sh_price) && XOk(g_sl_price) && g_sh_price>g_sl_price)
      {
       double top=g_sh_price,bottom=g_sl_price,span=top-bottom;
       double x1=g_map.X(MathMin(g_sh_idx,g_sl_idx));
@@ -504,21 +546,21 @@ void Render()
       g_front.Text(right_x-4.0*k,g_map.Y(bottom)-2.0*k,"Discount",XRgb(g_t.bull,0.9),TA_RIGHT|TA_BOTTOM);
      }
 
-   for(int j=0; j<ArraySize(g_fvgs); j++)
+   for(int j=0; j<ArraySize(g_fvgs) && g_ui.Opt(OPT_FVG); j++)
       if(g_fvgs[j].active)
          DrawZone(g_fvgs[j],right_x,false);
-   for(int j=0; j<ArraySize(g_obs); j++)
+   for(int j=0; j<ArraySize(g_obs) && g_ui.Opt(OPT_OB); j++)
       if(g_obs[j].active)
          DrawZone(g_obs[j],right_x,true);
 
-   for(int j=0; j<ArraySize(g_eqs); j++)
+   for(int j=0; j<ArraySize(g_eqs) && g_ui.Opt(OPT_EQ); j++)
       if(g_eqs[j].used)
          DrawMark(g_eqs[j],g_t.gold,1.5,2.5);
-   for(int j=0; j<ArraySize(g_marks); j++)
+   for(int j=0; j<ArraySize(g_marks) && g_ui.Opt(OPT_STRUCT); j++)
       if(g_marks[j].used)
          DrawMark(g_marks[j],g_marks[j].bull ? g_t.bull : g_t.bear,5.0,3.0);
 
-   if(InpShowSwings)
+   if(g_ui.Opt(OPT_SWINGS))
      {
       g_front.SetFont(XAU_FONT,7.5,FW_SEMIBOLD);
       for(int j=0; j<ArraySize(g_swings); j++)
@@ -534,7 +576,7 @@ void Render()
         }
      }
 
-   if(InpShowSweeps)
+   if(g_ui.Opt(OPT_SWEEPS))
      {
       int from=g_map.From(),to=g_map.To();
       for(int i=from; i<=to; i++)

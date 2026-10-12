@@ -27,6 +27,13 @@
 
 #include <XauSuite/XauSuite.mqh>
 
+//--- legend quick-settings switches
+#define OPT_RATIO 0
+#define OPT_XAG   1
+#define OPT_DXY   2
+#define OPT_CARD  3
+#define OPT_TAGS  4
+
 input group "Symbols"
 input string         InpDxySymbol    = "";   // US dollar index symbol (empty = auto / synthetic)
 input string         InpSilverSymbol = "";   // Silver symbol (empty = auto)
@@ -47,6 +54,10 @@ CXauCanvas g_front;
 CXauMap    g_map;
 CXauGate   g_gate;
 int        g_total=0;
+CXauUI      g_ui;
+CXauMovable g_mv;
+CXauCanvas  g_card;
+double      g_theme_ver=0.0;
 uint       g_zcols[],g_dcols[];
 string     g_dxy="";        // real dollar index symbol, "" when synthetic
 string     g_xag="";
@@ -141,6 +152,14 @@ int OnInit()
    if(g_xag=="")
       Print("XAU Intermarket Radar: no silver symbol found - set it in the inputs");
 
+   g_ui.Init("XAU Intermarket Radar",g_t.cyan);
+   g_ui.Add("Gold / silver ratio z-score",true);
+   g_ui.Add("Silver correlation",true);
+   g_ui.Add("DXY correlation",true);
+   g_ui.Add("Read-out card",InpShowPanel);
+   g_ui.Add("Value tags",true);
+   g_mv.Init("XAU Radar card",1);
+   ReloadTheme();
    IndicatorSetString(INDICATOR_SHORTNAME,"XAU Intermarket Radar");
    IndicatorSetInteger(INDICATOR_DIGITS,2);
    g_gate.Init(250);
@@ -150,6 +169,8 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_gate.Stop();
+   g_ui.Destroy();
+   g_card.Destroy();
    g_back.Destroy();
    g_front.Destroy();
    ChartRedraw();
@@ -318,14 +339,41 @@ void OnTimer()
          ChartSetSymbolPeriod(0,_Symbol,_Period);
       return;
      }
+   if(XauThemeVersion()!=g_theme_ver)
+     {
+      ReloadTheme();
+      if(InpTheme==XAU_THEME_AUTO)
+         XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
    if(g_gate.Pending())
       Render();
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   int r=g_ui.OnEvent(id,lparam,dparam,sparam);
+   if((r&XUI_THEME)!=0)
+     {
+      ReloadTheme();
+      XauRestyleChart(0,g_t);
       Render();
+      return;
+     }
+   if((r&XUI_VISUAL)!=0 || id==CHARTEVENT_CHART_CHANGE)
+     {
+      Render();
+      return;
+     }
+   int m=g_mv.OnEvent(id,lparam,dparam,sparam);
+   if((m&(XMV_MOVED|XMV_RESIZED|XMV_TOGGLED|XMV_HOVER))!=0)
+     {
+      DrawPanel();
+      ChartRedraw();
+     }
+   if((m&XMV_DBLCLICK)!=0)
+      g_ui.OpenSettings();
   }
 
 //+------------------------------------------------------------------+
@@ -376,18 +424,76 @@ uint XagState(const double c,string &state)
    return(g_t.neutral);
   }
 
-void PanelRow(const double x,const double y,const double w,const string name,const string value,const string state,
-              const uint rgb)
+//--- (re)load the theme; also called when the suite theme changes on any chart
+void ReloadTheme()
   {
-   double k=g_front.K();
-   g_front.Circle(x+4.0*k,y,3.0*k,XRgb(rgb,1.0));
-   g_front.SetFont(XAU_FONT,7.5,FW_SEMIBOLD);
-   g_front.Text(x+12.0*k,y,name,XRgb(g_t.text,0.95),TA_LEFT|TA_VCENTER);
-   g_front.SetFont(XAU_FONT,8.0,FW_BOLD);
-   g_front.Text(x+86.0*k,y,value,XRgb(rgb,1.0),TA_RIGHT|TA_VCENTER);
+   XauLoadTheme(InpTheme,g_t);
+   g_ui.SetTheme(g_t);
+   g_theme_ver=XauThemeVersion();
+  }
+
+void PanelRow(const double x,const double y,const double w,const double sc,const string name,const string value,
+              const string state,const uint rgb)
+  {
+   double k=g_card.K();
+   double s=k*sc;
+   g_card.Circle(x+4.0*s,y,3.0*s,XRgb(rgb,1.0));
+   g_card.SetFont(XAU_FONT,7.5*sc,FW_SEMIBOLD);
+   g_card.Text(x+12.0*s,y,name,XRgb(g_t.text,0.95),TA_LEFT|TA_VCENTER);
+   g_card.SetFont(XAU_FONT,8.0*sc,FW_BOLD);
+   g_card.Text(x+86.0*s,y,value,XRgb(rgb,1.0),TA_RIGHT|TA_VCENTER);
    double cw=0.0,ch=0.0;
-   g_front.PillSize(state,7.0,cw,ch);
-   g_front.Pill(x+w-cw*0.5,y,state,XRgb(rgb,0.18),XRgb(rgb,1.0),XA_CENTER,7.0);
+   g_card.PillSize(state,7.0*sc,cw,ch);
+   g_card.Pill(x+w-cw*0.5,y,state,XRgb(rgb,0.18),XRgb(rgb,1.0),XA_CENTER,7.0*sc);
+  }
+
+//--- movable read-out card (default: under the legend row)
+void DrawPanel()
+  {
+   int last=g_total-1;
+   if(!g_ui.Opt(OPT_CARD) || g_ui.Hidden() || last<0)
+     {
+      g_card.Destroy();
+      return;
+     }
+   double k=g_card.K();
+   double sc=g_mv.scale;
+   double s=k*sc;
+   double w=262.0*s,row=18.0*s,hh=28.0*s;
+   double h=(g_mv.collapsed ? hh : hh+8.0*s+3.0*row);
+   double x=0.0,y=0.0;
+   if(!XCardBegin(g_card,"XAU.Radar.card",g_mv,w,h,hh,(int)(8.0*k),(int)(44.0*k),x,y))
+      return;
+   g_card.Card(x,y,w,h,XRgb(g_t.panel,0.94),XRgb(g_t.border,1.0),XRgb(g_t.gold,0.9));
+   if(g_mv.hover==1)
+      g_card.RoundRect(x+1.0,y+1.0,x+w-1.0,y+hh,8.0*k,XRgb(g_t.border,0.35));
+   g_card.SetFont(XAU_FONT,7.5*sc,FW_BOLD);
+   g_card.Text(x+10.0*s,y+hh*0.5,"INTERMARKET",XRgb(g_t.gold,1.0),TA_LEFT|TA_VCENTER);
+   string st;
+   if(g_mv.collapsed)
+     {
+      uint c0=DxyState(BufDxyCorr[last],st);
+      g_card.SetFont(XAU_FONT,7.5*sc,FW_SEMIBOLD);
+      g_card.Text(x+w-30.0*k,y+hh*0.5,"DXY "+XNum(BufDxyCorr[last],2)+"  "+st,XRgb(c0,1.0),TA_RIGHT|TA_VCENTER);
+     }
+   else
+     {
+      g_card.SetFont(XAU_FONT,7.0*sc,FW_NORMAL);
+      g_card.Text(x+w-30.0*k,y+hh*0.5,IntegerToString(InpCorrLen)+"-bar returns"+(g_synthetic ? " | synthetic DXY" : ""),
+                  XRgb(g_t.muted,1.0),TA_RIGHT|TA_VCENTER);
+      double ry=y+hh+4.0*s+row*0.5;
+      uint c=DxyState(BufDxyCorr[last],st);
+      PanelRow(x+10.0*s,ry,w-26.0*s,sc,"DXY",XNum(BufDxyCorr[last],2),st,c);
+      c=XagState(BufXagCorr[last],st);
+      PanelRow(x+10.0*s,ry+row,w-26.0*s,sc,"Silver",XNum(BufXagCorr[last],2),st,c);
+      double ratio=BufRatio[last];
+      double z=(XOk(BufZ[last]) ? BufZ[last]*3.0 : EMPTY_VALUE);
+      string zs=(XOk(z) ? "z "+XSigned(z,2) : "z n/a");
+      uint zc=(XOk(z) && z>=0.0 ? g_t.gold : g_t.silver);
+      PanelRow(x+10.0*s,ry+2.0*row,w-26.0*s,sc,"Au/Ag",XNum(ratio,1),zs,zc);
+     }
+   XCardChrome(g_card,g_mv,g_t,x,y,w,h,hh);
+   g_card.Flush();
   }
 
 void Render()
@@ -401,6 +507,16 @@ void Render()
       return;
    if(!XBegin(g_back,"XAU.Radar.back",g_map,true) || !XBegin(g_front,"XAU.Radar.front",g_map,false))
       return;
+   g_mv.SetSub(sub);
+   g_ui.Draw(sub);
+   if(g_ui.Hidden())
+     {
+      g_back.Flush();
+      g_front.Flush();
+      g_card.Destroy();
+      ChartRedraw();
+      return;
+     }
    double k=g_front.K();
    int from=g_map.From(),to=g_map.To();
    int last=g_total-1;
@@ -420,48 +536,26 @@ void Render()
       g_zcols[i]=(XOk(BufZ[i]) && BufZ[i]>=0.0 ? XRgb(g_t.gold,0.50) : XRgb(g_t.silver,0.40));
       g_dcols[i]=XRgb(DxyState(BufDxyCorr[i],s),1.0);
      }
-   XColumns(g_back,g_map,BufZ,0.0,g_zcols,0.5);
-   XStrokeSeries(g_front,g_map,BufXagCorr,XRgb(g_t.silver,0.85),1.2);
-   XStrokeSeriesColored(g_front,g_map,BufDxyCorr,g_dcols,2.0,0.2);
+   if(g_ui.Opt(OPT_RATIO))
+      XColumns(g_back,g_map,BufZ,0.0,g_zcols,0.5);
+   if(g_ui.Opt(OPT_XAG))
+      XStrokeSeries(g_front,g_map,BufXagCorr,XRgb(g_t.silver,0.85),1.2);
+   if(g_ui.Opt(OPT_DXY))
+      XStrokeSeriesColored(g_front,g_map,BufDxyCorr,g_dcols,2.0,0.2);
 
    //--- live value tags
    double xt=g_map.X(last)+MathMax(2.0*g_map.spacing,8.0*k);
    XauTag tags[];
    int n=0;
-   if(XOk(BufDxyCorr[last]))
+   if(XOk(BufDxyCorr[last]) && g_ui.Opt(OPT_TAGS) && g_ui.Opt(OPT_DXY))
       XAddTag(tags,n,g_map.Y(BufDxyCorr[last]),"DXY "+DoubleToString(BufDxyCorr[last],2),
               XRgb(DxyState(BufDxyCorr[last],s),1.0),XRgb(g_t.ink,1.0));
-   if(XOk(BufXagCorr[last]))
+   if(XOk(BufXagCorr[last]) && g_ui.Opt(OPT_TAGS) && g_ui.Opt(OPT_XAG))
       XAddTag(tags,n,g_map.Y(BufXagCorr[last]),"XAG "+DoubleToString(BufXagCorr[last],2),XRgb(g_t.silver,0.9),
               XRgb(g_t.ink,1.0));
    XDrawTags(g_front,tags,n,xt,7.0);
 
-   //--- read-out card (below the sub-window caption)
-   if(InpShowPanel)
-     {
-      double w=250.0*k,row=18.0*k;
-      double h=34.0*k+3.0*row;
-      double x=8.0*k,y=20.0*k;
-      if(y+h>g_map.height-4.0*k)
-         y=MathMax(2.0*k,g_map.height-h-4.0*k);
-      g_front.Card(x,y,w,h,XRgb(g_t.panel,0.92),XRgb(g_t.border,1.0),XRgb(g_t.gold,0.9));
-      g_front.SetFont(XAU_FONT,7.5,FW_BOLD);
-      g_front.Text(x+10.0*k,y+9.0*k,"INTERMARKET",XRgb(g_t.gold,1.0),TA_LEFT|TA_TOP);
-      g_front.SetFont(XAU_FONT,7.0,FW_NORMAL);
-      g_front.Text(x+w-10.0*k,y+9.0*k,IntegerToString(InpCorrLen)+"-bar returns"+(g_synthetic ? " | synthetic DXY" : ""),
-                   XRgb(g_t.muted,1.0),TA_RIGHT|TA_TOP);
-      double ry=y+34.0*k;
-      string st;
-      uint c=DxyState(BufDxyCorr[last],st);
-      PanelRow(x+10.0*k,ry,w-20.0*k,"DXY",XNum(BufDxyCorr[last],2),st,c);
-      c=XagState(BufXagCorr[last],st);
-      PanelRow(x+10.0*k,ry+row,w-20.0*k,"Silver",XNum(BufXagCorr[last],2),st,c);
-      double ratio=BufRatio[last];
-      double z=(XOk(BufZ[last]) ? BufZ[last]*3.0 : EMPTY_VALUE);
-      string zs=(XOk(z) ? "z "+XSigned(z,2) : "z n/a");
-      uint zc=(XOk(z) && z>=0.0 ? g_t.gold : g_t.silver);
-      PanelRow(x+10.0*k,ry+2.0*row,w-20.0*k,"Au/Ag",XNum(ratio,1),zs,zc);
-     }
+   DrawPanel();
 
    g_back.Flush();
    g_front.Flush();

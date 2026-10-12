@@ -36,6 +36,14 @@
 
 #include <XauSuite/XauSuite.mqh>
 
+//--- legend quick-settings switches
+#define OPT_CLOUD   0
+#define OPT_BASE    1
+#define OPT_TRAIL   2
+#define OPT_SIGNALS 3
+#define OPT_CANDLES 4
+#define OPT_GLOW    5
+
 input group "Trend ribbon"
 input int            InpFastLen       = 21;    // Fast EMA
 input int            InpSlowLen       = 55;    // Slow EMA
@@ -67,6 +75,8 @@ CXauCanvas g_front;
 CXauMap    g_map;
 CXauGate   g_gate;
 int        g_total=0;
+CXauUI     g_ui;
+double     g_theme_ver=0.0;
 uint       g_cFast[],g_cSlow[];
 double     g_up[],g_dn[];
 
@@ -97,14 +107,17 @@ int OnInit()
    for(int p=0; p<9; p++)
       PlotIndexSetDouble(p,PLOT_EMPTY_VALUE,EMPTY_VALUE);
 
-   //--- regime candle palette: strong bull, bull, neutral, bear, strong bear
    PlotIndexSetInteger(0,PLOT_COLOR_INDEXES,5);
-   PlotIndexSetInteger(0,PLOT_LINE_COLOR,0,XClr(g_t.bull));
-   PlotIndexSetInteger(0,PLOT_LINE_COLOR,1,XClr(XLerp(XRgb(g_t.bull,1.0),XRgb(g_t.neutral,1.0),0.45)&0xFFFFFF));
-   PlotIndexSetInteger(0,PLOT_LINE_COLOR,2,XClr(g_t.neutral));
-   PlotIndexSetInteger(0,PLOT_LINE_COLOR,3,XClr(XLerp(XRgb(g_t.bear,1.0),XRgb(g_t.neutral,1.0),0.45)&0xFFFFFF));
-   PlotIndexSetInteger(0,PLOT_LINE_COLOR,4,XClr(g_t.bear));
    PlotIndexSetInteger(0,PLOT_SHOW_DATA,false);
+
+   g_ui.Init("XAU Trend Ribbon",g_t.gold);
+   g_ui.Add("Trend cloud",true);
+   g_ui.Add("Baseline EMA",true);
+   g_ui.Add("ATR trailing stop",InpShowTrail);
+   g_ui.Add("BUY / SELL flips",InpShowSignals);
+   g_ui.Add("Regime candles",InpShowBarColors);
+   g_ui.Add("Glow",InpGlow);
+   ReloadTheme();
 
    IndicatorSetString(INDICATOR_SHORTNAME,"XAU Trend Ribbon");
    IndicatorSetInteger(INDICATOR_DIGITS,_Digits);
@@ -115,6 +128,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_gate.Stop();
+   g_ui.Destroy();
    g_back.Destroy();
    g_front.Destroy();
    ChartRedraw();
@@ -203,26 +217,15 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
          flip_up=flip_up && close[i]>BufBase[i];
          flip_dn=flip_dn && close[i]<BufBase[i];
         }
-      BufBuy[i]=(InpShowSignals && flip_up ? low[i] : EMPTY_VALUE);
-      BufSell[i]=(InpShowSignals && flip_dn ? high[i] : EMPTY_VALUE);
+      BufBuy[i]=(flip_up ? low[i] : EMPTY_VALUE);
+      BufSell[i]=(flip_dn ? high[i] : EMPTY_VALUE);
 
-      //--- regime candles
-      if(InpShowBarColors)
-        {
-         BufCO[i]=open[i];
-         BufCH[i]=high[i];
-         BufCL[i]=low[i];
-         BufCC[i]=close[i];
-         BufCColor[i]=(regime==2 ? 0 : regime==1 ? 1 : regime==-1 ? 3 : regime==-2 ? 4 : 2);
-        }
-      else
-        {
-         BufCO[i]=EMPTY_VALUE;
-         BufCH[i]=EMPTY_VALUE;
-         BufCL[i]=EMPTY_VALUE;
-         BufCC[i]=EMPTY_VALUE;
-         BufCColor[i]=2;
-        }
+      //--- regime candles (shown or hidden by switching the plot's draw type)
+      BufCO[i]=open[i];
+      BufCH[i]=high[i];
+      BufCL[i]=low[i];
+      BufCC[i]=close[i];
+      BufCColor[i]=(regime==2 ? 0 : regime==1 ? 1 : regime==-1 ? 3 : regime==-2 ? 4 : 2);
      }
    g_total=rates_total;
    if(g_gate.Request(prev_calculated!=rates_total))
@@ -232,17 +235,47 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
 
 void OnTimer()
   {
+   if(XauThemeVersion()!=g_theme_ver)
+     {
+      ReloadTheme();
+      if(InpTheme==XAU_THEME_AUTO)
+         XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
    if(g_gate.Pending())
       Render();
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   int r=g_ui.OnEvent(id,lparam,dparam,sparam);
+   if((r&XUI_THEME)!=0)
+     {
+      ReloadTheme();
+      XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
+   if((r&XUI_VISUAL)!=0 || id==CHARTEVENT_CHART_CHANGE)
       Render();
   }
 
 //+------------------------------------------------------------------+
+//--- (re)load the theme; also called when the suite theme changes on any chart
+void ReloadTheme()
+  {
+   XauLoadTheme(InpTheme,g_t);
+   g_ui.SetTheme(g_t);
+   g_theme_ver=XauThemeVersion();
+   //--- regime candle palette: strong bull, bull, neutral, bear, strong bear
+   PlotIndexSetInteger(0,PLOT_LINE_COLOR,0,XClr(g_t.bull));
+   PlotIndexSetInteger(0,PLOT_LINE_COLOR,1,XClr(XLerp(XRgb(g_t.bull,1.0),XRgb(g_t.neutral,1.0),0.45)&0xFFFFFF));
+   PlotIndexSetInteger(0,PLOT_LINE_COLOR,2,XClr(g_t.neutral));
+   PlotIndexSetInteger(0,PLOT_LINE_COLOR,3,XClr(XLerp(XRgb(g_t.bear,1.0),XRgb(g_t.neutral,1.0),0.45)&0xFFFFFF));
+   PlotIndexSetInteger(0,PLOT_LINE_COLOR,4,XClr(g_t.bear));
+  }
+
 uint CloudColor(const int i)
   {
    double a=0.06;
@@ -262,6 +295,16 @@ void Render()
       return;
    if(!XBegin(g_back,"XAU.TrendRibbon.back",g_map,true) || !XBegin(g_front,"XAU.TrendRibbon.front",g_map,false))
       return;
+   //--- native regime candles follow the legend switch and the eye
+   PlotIndexSetInteger(0,PLOT_DRAW_TYPE,g_ui.Opt(OPT_CANDLES) && !g_ui.Hidden() ? DRAW_COLOR_CANDLES : DRAW_NONE);
+   g_ui.Draw(sub);
+   if(g_ui.Hidden())
+     {
+      g_back.Flush();
+      g_front.Flush();
+      ChartRedraw();
+      return;
+     }
    if(ArraySize(g_cFast)!=g_total)
      {
       ArrayResize(g_cFast,g_total);
@@ -272,7 +315,7 @@ void Render()
    int from=g_map.From(),to=g_map.To();
 
    //--- cloud, split exactly where the EMAs cross
-   for(int i=from+1; i<=to; i++)
+   for(int i=from+1; i<=to && g_ui.Opt(OPT_CLOUD); i++)
      {
       double fa=BufFast[i-1],sa=BufSlow[i-1],fb=BufFast[i],sb=BufSlow[i];
       if(!XOk(fa) || !XOk(sa) || !XOk(fb) || !XOk(sb))
@@ -292,7 +335,8 @@ void Render()
      }
 
    //--- trailing stop: gradient fill from the trail towards the candle bodies
-   if(InpShowTrail)
+   bool trail=g_ui.Opt(OPT_TRAIL);
+   if(trail)
      {
       for(int i=from+1; i<=to; i++)
         {
@@ -310,20 +354,21 @@ void Render()
       bool up=(BufFast[i]>BufSlow[i]);
       g_cFast[i]=XRgb(up ? g_t.bull : g_t.bear,1.0);
       g_cSlow[i]=XRgb(up ? g_t.bull : g_t.bear,0.55);
-      g_up[i]=(InpShowTrail && BufDir[i]<0 ? BufTrail[i] : EMPTY_VALUE);
-      g_dn[i]=(InpShowTrail && BufDir[i]>0 ? BufTrail[i] : EMPTY_VALUE);
+      g_up[i]=(trail && BufDir[i]<0 ? BufTrail[i] : EMPTY_VALUE);
+      g_dn[i]=(trail && BufDir[i]>0 ? BufTrail[i] : EMPTY_VALUE);
      }
-   XStrokeSeries(g_front,g_map,BufBase,XRgb(g_t.gold,1.0),2.0,0.0,0.0,InpGlow ? 0.22 : 0.0);
+   if(g_ui.Opt(OPT_BASE))
+      XStrokeSeries(g_front,g_map,BufBase,XRgb(g_t.gold,1.0),2.0,0.0,0.0,g_ui.Opt(OPT_GLOW) ? 0.22 : 0.0);
    XStrokeSeriesColored(g_front,g_map,BufSlow,g_cSlow,1.0);
    XStrokeSeriesColored(g_front,g_map,BufFast,g_cFast,1.6);
-   if(InpShowTrail)
+   if(trail)
      {
       XStrokeSeries(g_front,g_map,g_up,XRgb(g_t.bull,1.0),2.0);
       XStrokeSeries(g_front,g_map,g_dn,XRgb(g_t.bear,1.0),2.0);
      }
 
    //--- flip labels
-   if(InpShowSignals)
+   if(g_ui.Opt(OPT_SIGNALS))
      {
       for(int i=from; i<=to; i++)
         {

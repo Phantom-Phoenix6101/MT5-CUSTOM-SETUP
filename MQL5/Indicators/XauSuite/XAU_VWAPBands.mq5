@@ -33,6 +33,13 @@
 
 #include <XauSuite/XauSuite.mqh>
 
+//--- legend quick-settings switches
+#define OPT_BANDS 0
+#define OPT_FILLS 1
+#define OPT_PREV  2
+#define OPT_TAGS  3
+#define OPT_GLOW  4
+
 enum ENUM_XAU_ANCHOR_PERIOD
   {
    XAU_ANCHOR_DAY=0,   // Day
@@ -67,6 +74,8 @@ CXauCanvas g_front;
 CXauMap    g_map;
 CXauGate   g_gate;
 int        g_total=0;
+CXauUI     g_ui;
+double     g_theme_ver=0.0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -92,6 +101,13 @@ int OnInit()
    SetIndexBuffer(16,BufKey,INDICATOR_CALCULATIONS);
    for(int p=0; p<8; p++)
       PlotIndexSetDouble(p,PLOT_EMPTY_VALUE,EMPTY_VALUE);
+   g_ui.Init("XAU VWAP Bands",g_t.gold);
+   g_ui.Add("Sigma bands",true);
+   g_ui.Add("Band zones",true);
+   g_ui.Add("Previous period VWAP",InpShowPrev);
+   g_ui.Add("Price tags",InpShowTags);
+   g_ui.Add("Glow",InpGlow);
+   ReloadTheme();
    IndicatorSetString(INDICATOR_SHORTNAME,"XAU VWAP Bands");
    IndicatorSetInteger(INDICATOR_DIGITS,_Digits);
    g_gate.Init(120);
@@ -101,6 +117,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_gate.Stop();
+   g_ui.Destroy();
    g_back.Destroy();
    g_front.Destroy();
    ChartRedraw();
@@ -219,7 +236,7 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
       BufL2[i]=vwap-InpMult2*dev;
       BufU3[i]=vwap+InpMult3*dev;
       BufL3[i]=vwap-InpMult3*dev;
-      BufPrev[i]=(InpShowPrev ? prev : EMPTY_VALUE);
+      BufPrev[i]=prev;
      }
    g_total=rates_total;
    if(g_gate.Request(prev_calculated!=rates_total))
@@ -229,17 +246,41 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
 
 void OnTimer()
   {
+   if(XauThemeVersion()!=g_theme_ver)
+     {
+      ReloadTheme();
+      if(InpTheme==XAU_THEME_AUTO)
+         XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
    if(g_gate.Pending())
       Render();
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   int r=g_ui.OnEvent(id,lparam,dparam,sparam);
+   if((r&XUI_THEME)!=0)
+     {
+      ReloadTheme();
+      XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
+   if((r&XUI_VISUAL)!=0 || id==CHARTEVENT_CHART_CHANGE)
       Render();
   }
 
 //+------------------------------------------------------------------+
+//--- (re)load the theme; also called when the suite theme changes on any chart
+void ReloadTheme()
+  {
+   XauLoadTheme(InpTheme,g_t);
+   g_ui.SetTheme(g_t);
+   g_theme_ver=XauThemeVersion();
+  }
+
 void Render()
   {
    if(g_total<2)
@@ -251,25 +292,40 @@ void Render()
       return;
    if(!XBegin(g_back,"XAU.VWAP.back",g_map,true) || !XBegin(g_front,"XAU.VWAP.front",g_map,false))
       return;
+   g_ui.Draw(sub);
+   if(g_ui.Hidden())
+     {
+      g_back.Flush();
+      g_front.Flush();
+      ChartRedraw();
+      return;
+     }
 
    //--- zones: value band, then stretch and extreme gradients fading towards the VWAP
-   XFillSeries(g_back,g_map,BufU1,BufL1,XRgb(g_t.gold,0.05));
-   XFillSeries(g_back,g_map,BufU2,BufU1,XRgb(g_t.bear,0.08),0.45);
-   XFillSeries(g_back,g_map,BufU3,BufU2,XRgb(g_t.bear,0.15),0.55);
-   XFillSeries(g_back,g_map,BufL2,BufL1,XRgb(g_t.bull,0.08),0.45);
-   XFillSeries(g_back,g_map,BufL3,BufL2,XRgb(g_t.bull,0.15),0.55);
+   if(g_ui.Opt(OPT_FILLS))
+     {
+      XFillSeries(g_back,g_map,BufU1,BufL1,XRgb(g_t.gold,0.05));
+      XFillSeries(g_back,g_map,BufU2,BufU1,XRgb(g_t.bear,0.08),0.45);
+      XFillSeries(g_back,g_map,BufU3,BufU2,XRgb(g_t.bear,0.15),0.55);
+      XFillSeries(g_back,g_map,BufL2,BufL1,XRgb(g_t.bull,0.08),0.45);
+      XFillSeries(g_back,g_map,BufL3,BufL2,XRgb(g_t.bull,0.15),0.55);
+     }
 
    //--- band edges
-   XStrokeSeries(g_front,g_map,BufU1,XRgb(g_t.bear,0.35),1.0);
-   XStrokeSeries(g_front,g_map,BufL1,XRgb(g_t.bull,0.35),1.0);
-   XStrokeSeries(g_front,g_map,BufU2,XRgb(g_t.bear,0.55),1.0);
-   XStrokeSeries(g_front,g_map,BufL2,XRgb(g_t.bull,0.55),1.0);
-   XStrokeSeries(g_front,g_map,BufU3,XRgb(g_t.bear,0.80),1.0);
-   XStrokeSeries(g_front,g_map,BufL3,XRgb(g_t.bull,0.80),1.0);
-   XStrokeSeries(g_front,g_map,BufPrev,XRgb(g_t.gold,0.60),1.0,1.5,2.5);
-   XStrokeSeries(g_front,g_map,BufVwap,XRgb(g_t.gold,1.0),2.0,0.0,0.0,InpGlow ? 0.25 : 0.0);
+   if(g_ui.Opt(OPT_BANDS))
+     {
+      XStrokeSeries(g_front,g_map,BufU1,XRgb(g_t.bear,0.35),1.0);
+      XStrokeSeries(g_front,g_map,BufL1,XRgb(g_t.bull,0.35),1.0);
+      XStrokeSeries(g_front,g_map,BufU2,XRgb(g_t.bear,0.55),1.0);
+      XStrokeSeries(g_front,g_map,BufL2,XRgb(g_t.bull,0.55),1.0);
+      XStrokeSeries(g_front,g_map,BufU3,XRgb(g_t.bear,0.80),1.0);
+      XStrokeSeries(g_front,g_map,BufL3,XRgb(g_t.bull,0.80),1.0);
+     }
+   if(g_ui.Opt(OPT_PREV))
+      XStrokeSeries(g_front,g_map,BufPrev,XRgb(g_t.gold,0.60),1.0,1.5,2.5);
+   XStrokeSeries(g_front,g_map,BufVwap,XRgb(g_t.gold,1.0),2.0,0.0,0.0,g_ui.Opt(OPT_GLOW) ? 0.25 : 0.0);
 
-   if(InpShowTags)
+   if(g_ui.Opt(OPT_TAGS))
      {
       int last=g_total-1;
       double x=g_map.X(last)+MathMax(3.0*g_map.spacing,10.0*g_front.K());
@@ -278,13 +334,13 @@ void Render()
       if(XOk(BufVwap[last]))
          XAddTag(tags,n,g_map.Y(BufVwap[last]),"VWAP "+DoubleToString(BufVwap[last],2),XRgb(g_t.gold,1.0),
                  XRgb(g_t.ink,1.0));
-      if(XOk(BufU3[last]))
+      if(XOk(BufU3[last]) && g_ui.Opt(OPT_BANDS))
          XAddTag(tags,n,g_map.Y(BufU3[last]),"+"+DoubleToString(InpMult3,1)+ShortToString(0x03C3),XRgb(g_t.bear,0.85),
                  XRgb(g_t.ink,1.0));
-      if(XOk(BufL3[last]))
+      if(XOk(BufL3[last]) && g_ui.Opt(OPT_BANDS))
          XAddTag(tags,n,g_map.Y(BufL3[last]),"-"+DoubleToString(InpMult3,1)+ShortToString(0x03C3),XRgb(g_t.bull,0.85),
                  XRgb(g_t.ink,1.0));
-      if(XOk(BufPrev[last]))
+      if(XOk(BufPrev[last]) && g_ui.Opt(OPT_PREV))
          XAddTag(tags,n,g_map.Y(BufPrev[last]),"pVWAP "+DoubleToString(BufPrev[last],2),XRgb(g_t.gold,0.55),
                  XRgb(g_t.ink,1.0));
       XDrawTags(g_front,tags,n,x,7.5);

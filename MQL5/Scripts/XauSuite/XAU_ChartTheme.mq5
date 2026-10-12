@@ -23,7 +23,7 @@ input bool           InpChartShift = true;  // Leave space on the right for tags
 void OnStart()
   {
    ENUM_XAU_THEME id=XauResolveTheme(InpTheme);
-   GlobalVariableSet(XAU_THEME_GV,(double)id);
+   XauSetSuiteTheme(id);
    XauTheme t;
    XauLoadTheme(id,t);
    XauApplyChartTheme(ChartID(),t,InpShowGrid,InpHollowBull,InpHideVolume,InpChartShift);

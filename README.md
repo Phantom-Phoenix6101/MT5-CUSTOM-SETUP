@@ -35,6 +35,29 @@ MT5 draws indicator plots with aliased 1-pixel GDI lines. Every indicator here i
 | `Scripts/XAU_OneClickSetup` | Builds the whole workspace in one click (see below) |
 | `Scripts/XAU_ChartTheme` | Restyles the chart (background, candles, grid, axis) to match a theme |
 
+## Legend, quick settings and panels
+
+Every indicator adds a TradingView-style **legend row** at the top-left of its window:
+
+- **👁 Eye**: hides or shows everything the indicator draws, without removing it.
+- **⚙ Gear** (or click the name): opens **quick settings**. These are on/off switches for each layer
+  (cloud, trail, flips, order blocks, FVGs, bands, tags, divergences…) plus a **Theme** row that switches
+  the theme on every chart at once.
+- **Lengths and levels**: press Ctrl+I, pick the indicator and click *Edit*. MT5 doesn't let indicators
+  open their own properties dialog.
+
+The **Command Center**, the **ADR card** and the **Intermarket card** are movable panels:
+
+- **Drag** the header to move the panel.
+- **Drag the corner grip** (bottom-right) to resize it.
+- **Click the chevron** to collapse it to one line. The collapsed Command Center still shows the bias
+  verdict.
+- **Double-click** the panel to open its quick settings.
+
+Switches, hidden state, panel positions, sizes and collapse state are remembered per chart, including
+across time frame changes. While the cursor is over a legend row or panel, chart scrolling pauses so a
+drag moves the widget, not the chart.
+
 ## Themes
 
 Every indicator has a **Colour theme** input:

@@ -10,6 +10,7 @@
 #include "XauTime.mqh"
 #include "XauCanvas.mqh"
 #include "XauChart.mqh"
+#include "XauUI.mqh"
 
 #endif
 //+------------------------------------------------------------------+

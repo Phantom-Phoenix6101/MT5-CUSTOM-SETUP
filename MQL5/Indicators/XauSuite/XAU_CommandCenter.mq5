@@ -17,6 +17,12 @@
 
 #include <XauSuite/XauSuite.mqh>
 
+//--- legend quick-settings switches (dashboard sections)
+#define OPT_MATRIX 0
+#define OPT_BIAS   1
+#define OPT_DAY    2
+#define OPT_READ   3
+
 enum ENUM_XAU_CORNER
   {
    XAU_CORNER_TR=0, // Top right
@@ -53,7 +59,10 @@ double          g_last_close=0.0;
 datetime        g_last_time=0;
 ENUM_TIMEFRAMES g_tfs[4];
 int             g_hFast[4],g_hSlow[4],g_hRsi[4],g_hAdx[4];
-double          g_s=1.0;   // layout scale = DPI x size input
+double          g_s=1.0;   // layout scale = DPI x size input x user resize
+CXauUI          g_ui;
+CXauMovable     g_mv;
+double          g_theme_ver=0.0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -82,6 +91,13 @@ int OnInit()
       g_hRsi[j]=iRSI(_Symbol,g_tfs[j],14,PRICE_CLOSE);
       g_hAdx[j]=iADXWilder(_Symbol,g_tfs[j],14);
      }
+   g_ui.Init("XAU Command Center",g_t.gold);
+   g_ui.Add("Timeframe matrix",true);
+   g_ui.Add("Bias verdict & gauge",true);
+   g_ui.Add("Day stats (ADR, PDH/PDL, ATR)",true);
+   g_ui.Add("Trade read",true);
+   g_mv.Init("XAU Command Center card",0);
+   ReloadTheme();
    IndicatorSetString(INDICATOR_SHORTNAME,"XAU Command Center");
    g_gate.Init(300);
    return(INIT_SUCCEEDED);
@@ -90,6 +106,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_gate.Stop();
+   g_ui.Destroy();
    g_cv.Destroy();
    for(int j=0; j<4; j++)
      {
@@ -164,6 +181,12 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
 
 void OnTimer()
   {
+   if(XauThemeVersion()!=g_theme_ver)
+     {
+      ReloadTheme();
+      if(InpTheme==XAU_THEME_AUTO)
+         XauRestyleChart(0,g_t);
+     }
    // the timer also refreshes the higher time frames when the chart time frame is quiet
    g_gate.Touch();
    if(g_gate.Pending())
@@ -172,8 +195,32 @@ void OnTimer()
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   int r=g_ui.OnEvent(id,lparam,dparam,sparam);
+   if((r&XUI_THEME)!=0)
+     {
+      ReloadTheme();
+      XauRestyleChart(0,g_t);
       Render();
+      return;
+     }
+   if((r&XUI_VISUAL)!=0 || id==CHARTEVENT_CHART_CHANGE)
+     {
+      Render();
+      return;
+     }
+   int m=g_mv.OnEvent(id,lparam,dparam,sparam);
+   if((m&(XMV_MOVED|XMV_RESIZED|XMV_TOGGLED|XMV_HOVER))!=0)
+      Render();
+   if((m&XMV_DBLCLICK)!=0)
+      g_ui.OpenSettings();
+  }
+
+//--- (re)load the theme; also called when the suite theme changes on any chart
+void ReloadTheme()
+  {
+   XauLoadTheme(InpTheme,g_t);
+   g_ui.SetTheme(g_t);
+   g_theme_ver=XauThemeVersion();
   }
 
 //+------------------------------------------------------------------+
@@ -285,7 +332,14 @@ void Render()
    if(g_total<3)
       return;
    int last=g_total-1;
-   g_s=g_cv.K()*XClamp(InpFontSize/11.0,0.7,1.8);
+   g_ui.Draw(0);
+   if(g_ui.Hidden())
+     {
+      g_cv.Destroy();
+      ChartRedraw();
+      return;
+     }
+   g_s=g_cv.K()*XClamp(InpFontSize/11.0,0.7,1.8)*g_mv.scale;
 
    //--- data
    double bias[4],rsi[4],adx[4];
@@ -391,33 +445,42 @@ void Render()
       if(XOk(score_pct) && score_pct<=-20.0)
          plan=(rsi0>30.0 ? "Sell rallies" : "Bearish but stretched: wait for a bounce");
 
-   //--- layout
+   //--- layout: header always, then the sections switched on in the legend
+   bool collapsed=g_mv.collapsed;
+   bool s_matrix=!collapsed && g_ui.Opt(OPT_MATRIX);
+   bool s_bias=!collapsed && g_ui.Opt(OPT_BIAS);
+   bool s_day=!collapsed && g_ui.Opt(OPT_DAY);
+   bool s_read=!collapsed && g_ui.Opt(OPT_READ);
    double pad=S(14.0);
    double W=S(318.0);
    double row=S(23.0);
    double info=S(21.0);
-   double H=pad+S(26.0)+S(18.0)+S(12.0)+S(18.0)+4.0*row+S(12.0)+S(46.0)+S(10.0)+5.0*info+S(10.0)+S(20.0)+pad;
-   double shadow=S(6.0);
-   int cw=(int)MathCeil(W+2.0*shadow),ch=(int)MathCeil(H+2.0*shadow);
+   double header_h=pad+S(26.0)+S(18.0);
+   double H=header_h+(collapsed ? S(6.0) : pad);
+   if(s_matrix)
+      H+=S(12.0)+S(18.0)+4.0*row;
+   if(s_bias)
+      H+=S(12.0)+S(46.0);
+   if(s_day)
+      H+=S(10.0)+5.0*info;
+   if(s_read)
+      H+=S(10.0)+S(20.0);
    int chart_w=(int)ChartGetInteger(0,CHART_WIDTH_IN_PIXELS);
    int chart_h=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS,0);
    int m=(int)MathRound(InpMargin*g_cv.K());
-   int cx=(InpCorner==XAU_CORNER_TL || InpCorner==XAU_CORNER_BL ? m : chart_w-cw-m);
-   int cy=(InpCorner==XAU_CORNER_BR || InpCorner==XAU_CORNER_BL ? chart_h-ch-m : m);
-   if(cx<0)
-      cx=0;
-   if(cy<0)
-      cy=0;
-   if(!g_cv.Attach("XAU.CommandCenter",0,false) || !g_cv.Place(cx,cy,cw,ch))
+   int def_x=(InpCorner==XAU_CORNER_TL || InpCorner==XAU_CORNER_BL ? m : (int)(chart_w-W-m));
+   int def_y=(InpCorner==XAU_CORNER_BR || InpCorner==XAU_CORNER_BL ? (int)(chart_h-H-m) : m);
+   double x0=0.0,y0=0.0;
+   if(!XCardBegin(g_cv,"XAU.CommandCenter",g_mv,W,H,header_h,def_x,def_y,x0,y0))
       return;
-   g_cv.Clear();
 
-   double x0=shadow,y0=shadow;
    g_cv.Card(x0,y0,W,H,XRgb(g_t.panel,0.94),XRgb(g_t.border,1.0),XRgb(g_t.gold,0.95));
+   if(g_mv.hover==1)
+      g_cv.RoundRect(x0+1.0,y0+1.0,x0+W-1.0,y0+header_h,S(8.0),XRgb(g_t.border,0.30));
    double l=x0+pad,r=x0+W-pad,iw=W-2.0*pad;
    double y=y0+pad;
 
-   //--- header: symbol, price, change
+   //--- header: symbol, price, change (room on the right for the collapse chevron)
    Label(l,y+S(9.0),XPrettySymbol(_Symbol),XRgb(g_t.gold,1.0),11.0,FW_BOLD,TA_LEFT|TA_VCENTER);
    Label(l+S(84.0),y+S(9.0),DoubleToString(px,_Digits),XRgb(g_t.text,1.0),11.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
    if(XOk(day_change))
@@ -426,160 +489,182 @@ void Render()
       double w=0.0,h=0.0;
       string ct=XSigned(day_change,2)+"%";
       g_cv.PillSize(ct,8.0*g_s/g_cv.K(),w,h);
-      g_cv.Pill(r-w*0.5,y+S(9.0),ct,XRgb(crgb,1.0),XRgb(g_t.ink,1.0),XA_CENTER,8.0*g_s/g_cv.K());
+      g_cv.Pill(r-S(18.0)-w*0.5,y+S(9.0),ct,XRgb(crgb,1.0),XRgb(g_t.ink,1.0),XA_CENTER,8.0*g_s/g_cv.K());
      }
    y+=S(26.0);
    g_cv.Circle(l+S(4.0),y+S(8.0),S(3.5),XRgb(session=="Off-hours" ? g_t.muted : g_t.gold,1.0));
    Label(l+S(13.0),y+S(8.0),session,XRgb(session=="Off-hours" ? g_t.muted : g_t.gold,1.0),8.0,FW_SEMIBOLD,
          TA_LEFT|TA_VCENTER);
-   Label(r,y+S(8.0),TimeToString(g_last_time,TIME_MINUTES)+" server",XRgb(g_t.muted,1.0),7.5,FW_NORMAL,
-         TA_RIGHT|TA_VCENTER);
-   y+=S(18.0);
-   Divider(l,y+S(5.0),iw);
-   y+=S(12.0);
-
-   //--- timeframe matrix
-   double c1=l+S(44.0),c2=l+S(170.0),c3=r;
-   Label(l,y+S(8.0),"TF",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   Label(c1+S(32.0),y+S(8.0),"TREND",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_CENTER|TA_VCENTER);
-   Label(c2,y+S(8.0),"RSI",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_CENTER|TA_VCENTER);
-   Label(c3,y+S(8.0),"ADX",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_RIGHT|TA_VCENTER);
-   y+=S(18.0);
-   for(int j=0; j<4; j++)
+   if(collapsed)
      {
-      double cyr=y+row*0.5;
-      if(j%2==0)
-         g_cv.RoundRect(l-S(6.0),y+S(1.0),r+S(6.0),y+row-S(1.0),S(5.0),XRgb(g_t.border,0.35));
-      Label(l,cyr,XTfName(g_tfs[j]),XRgb(g_t.gold,1.0),8.5,FW_BOLD,TA_LEFT|TA_VCENTER);
-      TrendChip(c1+S(32.0),cyr,bias[j]);
-      uint rc=g_t.text;
-      if(XOk(rsi[j]))
-        {
-         if(rsi[j]>=70.0)
-            rc=g_t.bear;
-         else
-            if(rsi[j]<=30.0)
-               rc=g_t.bull;
-            else
-               if(rsi[j]>=55.0)
-                  rc=g_t.bull;
-               else
-                  if(rsi[j]<=45.0)
-                     rc=g_t.bear;
-        }
-      Label(c2,cyr,XNum(rsi[j],1),XRgb(rc,1.0),8.5,FW_SEMIBOLD,TA_CENTER|TA_VCENTER);
-      string at=XNum(adx[j],0);
-      uint ac=g_t.text;
-      if(XOk(adx[j]))
-        {
-         if(adx[j]>=25.0)
-           {
-            at=at+" trend";
-            ac=g_t.gold;
-           }
-         else
-            if(adx[j]<18.0)
-              {
-               at=at+" range";
-               ac=g_t.muted;
-              }
-        }
-      else
-         ac=g_t.muted;
-      Label(c3,cyr,at,XRgb(ac,1.0),8.0,FW_SEMIBOLD,TA_RIGHT|TA_VCENTER);
-      y+=row;
-     }
-   Divider(l,y+S(5.0),iw);
-   y+=S(12.0);
-
-   //--- bias verdict + gauge
-   Label(l,y+S(10.0),"BIAS",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   double vw=0.0,vh=0.0;
-   g_cv.PillSize(verdict,9.0*g_s/g_cv.K(),vw,vh);
-   g_cv.Pill(l+S(44.0)+vw*0.5,y+S(10.0),verdict,XRgb(vrgb,1.0),XRgb(g_t.ink,1.0),XA_CENTER,9.0*g_s/g_cv.K());
-   Label(r,y+S(10.0),XSigned(score_pct,0)+"%",XRgb(vrgb,1.0),10.0,FW_BOLD,TA_RIGHT|TA_VCENTER);
-   double gy=y+S(28.0),gh=S(6.0);
-   int seg=40;
-   for(int q=0; q<seg; q++)
-     {
-      double f=(q+0.5)/seg;
-      uint c=(f<0.5 ? XLerp(XRgb(g_t.bear,0.9),XRgb(g_t.neutral,0.35),f/0.5)
-              : XLerp(XRgb(g_t.neutral,0.35),XRgb(g_t.bull,0.9),(f-0.5)/0.5));
-      double sx=l+iw*q/seg,ex=l+iw*(q+1)/seg;
-      if(q==0)
-         g_cv.RoundRect(sx,gy,ex+gh,gy+gh,gh*0.5,c);
-      else
-         if(q==seg-1)
-            g_cv.RoundRect(sx-gh,gy,ex,gy+gh,gh*0.5,c);
-         else
-            g_cv.FillRect(sx,gy,ex,gy+gh,c);
-     }
-   g_cv.FillRect(l+iw*0.5-S(0.5),gy-S(3.0),l+iw*0.5+S(0.5),gy+gh+S(3.0),XRgb(g_t.muted,0.8));
-   if(XOk(score_pct))
-     {
-      double mx=l+iw*XClamp((score_pct+100.0)/200.0,0.0,1.0);
-      g_cv.Circle(mx,gy+gh*0.5,S(6.0),XRgb(g_t.panel,1.0),XRgb(vrgb,1.0),S(2.0));
-     }
-   Label(l,gy+gh+S(9.0),"bear",XRgb(g_t.muted,1.0),7.0,FW_NORMAL,TA_LEFT|TA_VCENTER);
-   Label(r,gy+gh+S(9.0),"bull",XRgb(g_t.muted,1.0),7.0,FW_NORMAL,TA_RIGHT|TA_VCENTER);
-   y+=S(46.0);
-   Divider(l,y+S(4.0),iw);
-   y+=S(10.0);
-
-   //--- info rows
-   double vx=l+S(84.0);
-   //  ADR usage
-   double cyr=y+info*0.5;
-   Label(l,cyr,"ADR("+IntegerToString(InpAdrLen)+")",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   if(XOk(adr) && adr>0.0)
-     {
-      double pct=100.0*used/adr;
-      uint fc=(pct>=100.0 ? g_t.orange : (pct>=70.0 ? g_t.gold : g_t.bull));
-      Label(vx,cyr,"$"+DoubleToString(adr,2),XRgb(g_t.text,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-      g_cv.Bar(vx+S(62.0),cyr-S(3.0),iw-S(84.0)-S(62.0)-S(40.0),S(6.0),pct/100.0,XRgb(g_t.border,1.0),XRgb(fc,1.0));
-      Label(r,cyr,DoubleToString(pct,0)+"%",XRgb(fc,1.0),8.5,FW_BOLD,TA_RIGHT|TA_VCENTER);
+      // collapsed: the verdict replaces the server clock so the card still says something useful
+      double vw=0.0,vh=0.0;
+      string vt=verdict+"  "+XSigned(score_pct,0)+"%";
+      g_cv.PillSize(vt,7.5*g_s/g_cv.K(),vw,vh);
+      g_cv.Pill(r-vw*0.5,y+S(8.0),vt,XRgb(vrgb,1.0),XRgb(g_t.ink,1.0),XA_CENTER,7.5*g_s/g_cv.K());
      }
    else
-      Label(vx,cyr,"-",XRgb(g_t.muted,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   y+=info;
-   //  position in the day's range
-   cyr=y+info*0.5;
-   Label(l,cyr,"Day range",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   if(XOk(pos))
+      Label(r,y+S(8.0),TimeToString(g_last_time,TIME_MINUTES)+" server",XRgb(g_t.muted,1.0),7.5,FW_NORMAL,
+            TA_RIGHT|TA_VCENTER);
+   y+=S(18.0);
+
+   //--- timeframe matrix
+   if(s_matrix)
      {
-      double bx=vx,bw=iw-S(84.0)-S(40.0);
-      g_cv.RoundRect(bx,cyr-S(3.0),bx+bw,cyr+S(3.0),S(3.0),XRgb(g_t.border,1.0));
-      double mx=bx+bw*XClamp(pos/100.0,0.0,1.0);
-      uint pc=(pos>=50.0 ? g_t.bull : g_t.bear);
-      g_cv.Circle(mx,cyr,S(5.0),XRgb(pc,1.0),XRgb(g_t.panel,1.0),S(1.5));
-      Label(r,cyr,DoubleToString(pos,0)+"%",XRgb(pc,1.0),8.5,FW_BOLD,TA_RIGHT|TA_VCENTER);
+      Divider(l,y+S(5.0),iw);
+      y+=S(12.0);
+      double c1=l+S(44.0),c2=l+S(170.0),c3=r;
+      Label(l,y+S(8.0),"TF",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      Label(c1+S(32.0),y+S(8.0),"TREND",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_CENTER|TA_VCENTER);
+      Label(c2,y+S(8.0),"RSI",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_CENTER|TA_VCENTER);
+      Label(c3,y+S(8.0),"ADX",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_RIGHT|TA_VCENTER);
+      y+=S(18.0);
+      for(int j=0; j<4; j++)
+        {
+         double cyr=y+row*0.5;
+         if(j%2==0)
+            g_cv.RoundRect(l-S(6.0),y+S(1.0),r+S(6.0),y+row-S(1.0),S(5.0),XRgb(g_t.border,0.35));
+         Label(l,cyr,XTfName(g_tfs[j]),XRgb(g_t.gold,1.0),8.5,FW_BOLD,TA_LEFT|TA_VCENTER);
+         TrendChip(c1+S(32.0),cyr,bias[j]);
+         uint rc=g_t.text;
+         if(XOk(rsi[j]))
+           {
+            if(rsi[j]>=70.0)
+               rc=g_t.bear;
+            else
+               if(rsi[j]<=30.0)
+                  rc=g_t.bull;
+               else
+                  if(rsi[j]>=55.0)
+                     rc=g_t.bull;
+                  else
+                     if(rsi[j]<=45.0)
+                        rc=g_t.bear;
+           }
+         Label(c2,cyr,XNum(rsi[j],1),XRgb(rc,1.0),8.5,FW_SEMIBOLD,TA_CENTER|TA_VCENTER);
+         string at=XNum(adx[j],0);
+         uint ac=g_t.text;
+         if(XOk(adx[j]))
+           {
+            if(adx[j]>=25.0)
+              {
+               at=at+" trend";
+               ac=g_t.gold;
+              }
+            else
+               if(adx[j]<18.0)
+                 {
+                  at=at+" range";
+                  ac=g_t.muted;
+                 }
+           }
+         else
+            ac=g_t.muted;
+         Label(c3,cyr,at,XRgb(ac,1.0),8.0,FW_SEMIBOLD,TA_RIGHT|TA_VCENTER);
+         y+=row;
+        }
      }
-   y+=info;
-   //  PDH / PDL
-   cyr=y+info*0.5;
-   Label(l,cyr,"PDH",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   Label(vx,cyr,XNum(pdh,2),XRgb(g_t.bear,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   Label(r,cyr,XOk(pdh) ? XSigned(pdh-px,2)+" away" : "-",XRgb(g_t.text,0.85),8.0,FW_NORMAL,TA_RIGHT|TA_VCENTER);
-   y+=info;
-   cyr=y+info*0.5;
-   Label(l,cyr,"PDL",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   Label(vx,cyr,XNum(pdl,2),XRgb(g_t.bull,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   Label(r,cyr,XOk(pdl) ? XSigned(px-pdl,2)+" above" : "-",XRgb(g_t.text,0.85),8.0,FW_NORMAL,TA_RIGHT|TA_VCENTER);
-   y+=info;
-   //  ATR regime
-   cyr=y+info*0.5;
-   Label(l,cyr,"ATR(14)",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   Label(vx,cyr,"$"+XNum(atr,2),XRgb(g_t.text,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
-   Chip(r,cyr,regime,regime_rgb,7.0*g_s/g_cv.K(),true);
-   y+=info;
-   Divider(l,y+S(4.0),iw);
-   y+=S(10.0);
+
+   //--- bias verdict + gauge
+   if(s_bias)
+     {
+      Divider(l,y+S(5.0),iw);
+      y+=S(12.0);
+      Label(l,y+S(10.0),"BIAS",XRgb(g_t.muted,1.0),7.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      double vw=0.0,vh=0.0;
+      g_cv.PillSize(verdict,9.0*g_s/g_cv.K(),vw,vh);
+      g_cv.Pill(l+S(44.0)+vw*0.5,y+S(10.0),verdict,XRgb(vrgb,1.0),XRgb(g_t.ink,1.0),XA_CENTER,9.0*g_s/g_cv.K());
+      Label(r,y+S(10.0),XSigned(score_pct,0)+"%",XRgb(vrgb,1.0),10.0,FW_BOLD,TA_RIGHT|TA_VCENTER);
+      double gy=y+S(28.0),gh=S(6.0);
+      int seg=40;
+      for(int q=0; q<seg; q++)
+        {
+         double f=(q+0.5)/seg;
+         uint c=(f<0.5 ? XLerp(XRgb(g_t.bear,0.9),XRgb(g_t.neutral,0.35),f/0.5)
+                 : XLerp(XRgb(g_t.neutral,0.35),XRgb(g_t.bull,0.9),(f-0.5)/0.5));
+         double sx=l+iw*q/seg,ex=l+iw*(q+1)/seg;
+         if(q==0)
+            g_cv.RoundRect(sx,gy,ex+gh,gy+gh,gh*0.5,c);
+         else
+            if(q==seg-1)
+               g_cv.RoundRect(sx-gh,gy,ex,gy+gh,gh*0.5,c);
+            else
+               g_cv.FillRect(sx,gy,ex,gy+gh,c);
+        }
+      g_cv.FillRect(l+iw*0.5-S(0.5),gy-S(3.0),l+iw*0.5+S(0.5),gy+gh+S(3.0),XRgb(g_t.muted,0.8));
+      if(XOk(score_pct))
+        {
+         double mx=l+iw*XClamp((score_pct+100.0)/200.0,0.0,1.0);
+         g_cv.Circle(mx,gy+gh*0.5,S(6.0),XRgb(g_t.panel,1.0),XRgb(vrgb,1.0),S(2.0));
+        }
+      Label(l,gy+gh+S(9.0),"bear",XRgb(g_t.muted,1.0),7.0,FW_NORMAL,TA_LEFT|TA_VCENTER);
+      Label(r,gy+gh+S(9.0),"bull",XRgb(g_t.muted,1.0),7.0,FW_NORMAL,TA_RIGHT|TA_VCENTER);
+      y+=S(46.0);
+     }
+
+   //--- info rows
+   if(s_day)
+     {
+      Divider(l,y+S(4.0),iw);
+      y+=S(10.0);
+      double vx=l+S(84.0);
+      //  ADR usage
+      double cyr=y+info*0.5;
+      Label(l,cyr,"ADR("+IntegerToString(InpAdrLen)+")",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      if(XOk(adr) && adr>0.0)
+        {
+         double pct=100.0*used/adr;
+         uint fc=(pct>=100.0 ? g_t.orange : (pct>=70.0 ? g_t.gold : g_t.bull));
+         Label(vx,cyr,"$"+DoubleToString(adr,2),XRgb(g_t.text,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+         g_cv.Bar(vx+S(62.0),cyr-S(3.0),iw-S(84.0)-S(62.0)-S(40.0),S(6.0),pct/100.0,XRgb(g_t.border,1.0),XRgb(fc,1.0));
+         Label(r,cyr,DoubleToString(pct,0)+"%",XRgb(fc,1.0),8.5,FW_BOLD,TA_RIGHT|TA_VCENTER);
+        }
+      else
+         Label(vx,cyr,"-",XRgb(g_t.muted,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      y+=info;
+      //  position in the day's range
+      cyr=y+info*0.5;
+      Label(l,cyr,"Day range",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      if(XOk(pos))
+        {
+         double bx=vx,bw=iw-S(84.0)-S(40.0);
+         g_cv.RoundRect(bx,cyr-S(3.0),bx+bw,cyr+S(3.0),S(3.0),XRgb(g_t.border,1.0));
+         double mx=bx+bw*XClamp(pos/100.0,0.0,1.0);
+         uint pc=(pos>=50.0 ? g_t.bull : g_t.bear);
+         g_cv.Circle(mx,cyr,S(5.0),XRgb(pc,1.0),XRgb(g_t.panel,1.0),S(1.5));
+         Label(r,cyr,DoubleToString(pos,0)+"%",XRgb(pc,1.0),8.5,FW_BOLD,TA_RIGHT|TA_VCENTER);
+        }
+      y+=info;
+      //  PDH / PDL
+      cyr=y+info*0.5;
+      Label(l,cyr,"PDH",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      Label(vx,cyr,XNum(pdh,2),XRgb(g_t.bear,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      Label(r,cyr,XOk(pdh) ? XSigned(pdh-px,2)+" away" : "-",XRgb(g_t.text,0.85),8.0,FW_NORMAL,TA_RIGHT|TA_VCENTER);
+      y+=info;
+      cyr=y+info*0.5;
+      Label(l,cyr,"PDL",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      Label(vx,cyr,XNum(pdl,2),XRgb(g_t.bull,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      Label(r,cyr,XOk(pdl) ? XSigned(px-pdl,2)+" above" : "-",XRgb(g_t.text,0.85),8.0,FW_NORMAL,TA_RIGHT|TA_VCENTER);
+      y+=info;
+      //  ATR regime
+      cyr=y+info*0.5;
+      Label(l,cyr,"ATR(14)",XRgb(g_t.muted,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      Label(vx,cyr,"$"+XNum(atr,2),XRgb(g_t.text,1.0),8.5,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+      Chip(r,cyr,regime,regime_rgb,7.0*g_s/g_cv.K(),true);
+      y+=info;
+     }
 
    //--- plain-language read
-   g_cv.RoundRect(l-S(6.0),y,r+S(6.0),y+S(20.0),S(6.0),XRgb(vrgb,0.12));
-   g_cv.FillRect(l-S(6.0),y+S(4.0),l-S(4.0),y+S(16.0),XRgb(vrgb,1.0));
-   Label(l+S(4.0),y+S(10.0),plan,XRgb(vrgb==g_t.neutral ? g_t.text : vrgb,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+   if(s_read)
+     {
+      Divider(l,y+S(4.0),iw);
+      y+=S(10.0);
+      g_cv.RoundRect(l-S(6.0),y,r+S(6.0),y+S(20.0),S(6.0),XRgb(vrgb,0.12));
+      g_cv.FillRect(l-S(6.0),y+S(4.0),l-S(4.0),y+S(16.0),XRgb(vrgb,1.0));
+      Label(l+S(4.0),y+S(10.0),plan,XRgb(vrgb==g_t.neutral ? g_t.text : vrgb,1.0),8.0,FW_SEMIBOLD,TA_LEFT|TA_VCENTER);
+     }
 
+   XCardChrome(g_cv,g_mv,g_t,x0,y0,W,H,header_h);
    g_cv.Flush();
    ChartRedraw();
   }

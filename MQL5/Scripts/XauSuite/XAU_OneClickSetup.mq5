@@ -233,7 +233,7 @@ void OnStart()
   {
    //--- theme first, so every indicator loads with it
    ENUM_XAU_THEME theme=XauResolveTheme(InpTheme);
-   GlobalVariableSet(XAU_THEME_GV,(double)theme);
+   XauSetSuiteTheme(theme);
    XauLoadTheme(theme,g_t);
 
    if(InpLayout!=XAU_LAYOUT_WORKSPACE)

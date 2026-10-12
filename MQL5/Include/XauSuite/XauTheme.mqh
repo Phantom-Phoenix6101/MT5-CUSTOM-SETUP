@@ -180,5 +180,47 @@ void XauApplyChartTheme(const long chart,const XauTheme &t,const bool grid,const
    ChartRedraw(chart);
   }
 
+//+------------------------------------------------------------------+
+//| Suite theme broadcast: scripts and the legend's theme switch      |
+//| store the theme and bump a version counter that every running     |
+//| indicator polls, so all charts restyle together.                  |
+//+------------------------------------------------------------------+
+#define XAU_THEME_VER_GV "XAU_SUITE_THEME_VER"
+
+double XauThemeVersion(void)
+  {
+   return(GlobalVariableCheck(XAU_THEME_VER_GV) ? GlobalVariableGet(XAU_THEME_VER_GV) : 0.0);
+  }
+
+void XauSetSuiteTheme(const ENUM_XAU_THEME id)
+  {
+   GlobalVariableSet(XAU_THEME_GV,(double)id);
+   GlobalVariableSet(XAU_THEME_VER_GV,XauThemeVersion()+1.0);
+  }
+
+string XauThemeName(const ENUM_XAU_THEME id)
+  {
+   switch(XauResolveTheme(id))
+     {
+      case XAU_THEME_AURORA:
+         return("Aurora");
+      case XAU_THEME_CLASSIC:
+         return("Classic");
+      case XAU_THEME_DAYLIGHT:
+         return("Daylight");
+      default:
+         return("Midnight");
+     }
+  }
+
+//--- restyle a chart for a theme while keeping its current grid / volume choices
+void XauRestyleChart(const long chart,const XauTheme &t)
+  {
+   bool grid=(bool)ChartGetInteger(chart,CHART_SHOW_GRID);
+   bool hide_volume=(ChartGetInteger(chart,CHART_SHOW_VOLUMES)==CHART_VOLUME_HIDE);
+   bool shift=(bool)ChartGetInteger(chart,CHART_SHIFT);
+   XauApplyChartTheme(chart,t,grid,false,hide_volume,shift);
+  }
+
 #endif
 //+------------------------------------------------------------------+

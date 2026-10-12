@@ -25,6 +25,13 @@
 
 #include <XauSuite/XauSuite.mqh>
 
+//--- legend quick-settings switches
+#define OPT_ZONES  0
+#define OPT_LINES  1
+#define OPT_REGIME 2
+#define OPT_CARD   3
+#define OPT_TAGS   4
+
 enum ENUM_XAU_ADR_MODE
   {
    XAU_ADR_DYNAMIC=0,  // Dynamic (from day high / low)
@@ -57,6 +64,10 @@ CXauCanvas g_front;
 CXauMap    g_map;
 CXauGate   g_gate;
 int        g_total=0;
+CXauUI      g_ui;
+CXauMovable g_mv;
+CXauCanvas  g_card;
+double      g_theme_ver=0.0;
 double     g_ranges[];   // completed day ranges, by day ordinal - 1
 uint       g_bg[];
 
@@ -82,6 +93,14 @@ int OnInit()
    SetIndexBuffer(14,BufAdr,INDICATOR_CALCULATIONS);
    for(int p=0; p<4; p++)
       PlotIndexSetDouble(p,PLOT_EMPTY_VALUE,EMPTY_VALUE);
+   g_ui.Init("XAU ADR & Volatility",g_t.orange);
+   g_ui.Add("Exhaustion zones",true);
+   g_ui.Add("ADR target lines",true);
+   g_ui.Add("Volatility regime background",InpShowRegime);
+   g_ui.Add("ADR info card",InpShowPanel);
+   g_ui.Add("Price tags",InpShowTags);
+   g_mv.Init("XAU ADR card",0);
+   ReloadTheme();
    IndicatorSetString(INDICATOR_SHORTNAME,"XAU ADR & Volatility");
    IndicatorSetInteger(INDICATOR_DIGITS,_Digits);
    g_gate.Init(150);
@@ -91,6 +110,8 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_gate.Stop();
+   g_ui.Destroy();
+   g_card.Destroy();
    g_back.Destroy();
    g_front.Destroy();
    ChartRedraw();
@@ -213,24 +234,62 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
 
 void OnTimer()
   {
+   if(XauThemeVersion()!=g_theme_ver)
+     {
+      ReloadTheme();
+      if(InpTheme==XAU_THEME_AUTO)
+         XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
    if(g_gate.Pending())
       Render();
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   int r=g_ui.OnEvent(id,lparam,dparam,sparam);
+   if((r&XUI_THEME)!=0)
+     {
+      ReloadTheme();
+      XauRestyleChart(0,g_t);
       Render();
+      return;
+     }
+   if((r&XUI_VISUAL)!=0 || id==CHARTEVENT_CHART_CHANGE)
+     {
+      Render();
+      return;
+     }
+   int m=g_mv.OnEvent(id,lparam,dparam,sparam);
+   if((m&(XMV_MOVED|XMV_RESIZED|XMV_TOGGLED|XMV_HOVER))!=0)
+     {
+      DrawPanel();
+      ChartRedraw();
+     }
+   if((m&XMV_DBLCLICK)!=0)
+      g_ui.OpenSettings();
   }
 
 //+------------------------------------------------------------------+
+//--- (re)load the theme; also called when the suite theme changes on any chart
+void ReloadTheme()
+  {
+   XauLoadTheme(InpTheme,g_t);
+   g_ui.SetTheme(g_t);
+   g_theme_ver=XauThemeVersion();
+  }
+
+//--- movable card: drag the header, resize from the corner grip, chevron collapses it
 void DrawPanel()
   {
    int last=g_total-1;
-   double adr=BufAdr[last];
-   if(!XOk(adr) || adr<=0.0 || PeriodSeconds()>=86400)
+   double adr=(last>=0 ? BufAdr[last] : EMPTY_VALUE);
+   if(!g_ui.Opt(OPT_CARD) || g_ui.Hidden() || !XOk(adr) || adr<=0.0 || PeriodSeconds()>=86400)
+     {
+      g_card.Destroy();
       return;
-   double k=g_front.K();
+     }
    double used=BufDHigh[last]-BufDLow[last];
    double pct=100.0*used/adr;
    double rank=BufRank[last];
@@ -248,30 +307,44 @@ void DrawPanel()
          regime_rgb=g_t.violet;
         }
 
-   double w=236.0*k,h=86.0*k,pad=12.0*k;
-   double x=g_map.width-w-14.0*k;
-   double y=g_map.height-h-14.0*k;
-   g_front.Card(x,y,w,h,XRgb(g_t.panel,0.92),XRgb(g_t.border,1.0),XRgb(g_t.gold,0.9));
-
-   g_front.SetFont(XAU_FONT,7.5,FW_SEMIBOLD);
-   g_front.Text(x+pad,y+pad,"ADR ("+IntegerToString(InpAdrLen)+"D)",XRgb(g_t.muted,1.0),TA_LEFT|TA_TOP);
-   g_front.SetFont(XAU_FONT,10.0,FW_BOLD);
-   g_front.Text(x+w-pad,y+pad-2.0*k,"$"+DoubleToString(adr,2),XRgb(g_t.gold,1.0),TA_RIGHT|TA_TOP);
-
+   double k=g_card.K();
+   double sc=g_mv.scale;
+   double s=k*sc;
+   double w=236.0*s,hh=32.0*s,pad=12.0*s;
+   double h=(g_mv.collapsed ? hh : 88.0*s);
+   int def_x=(int)(g_map.width-w-14.0*k);
+   int def_y=(int)(g_map.height-h-14.0*k);
+   double x=0.0,y=0.0;
+   if(!XCardBegin(g_card,"XAU.ADR.card",g_mv,w,h,hh,def_x,def_y,x,y))
+      return;
+   g_card.Card(x,y,w,h,XRgb(g_t.panel,0.94),XRgb(g_t.border,1.0),XRgb(g_t.gold,0.9));
+   if(g_mv.hover==1)
+      g_card.RoundRect(x+1.0,y+1.0,x+w-1.0,y+hh,8.0*k,XRgb(g_t.border,0.35));
    uint fill=(pct>=100.0 ? g_t.bear : (pct>=70.0 ? g_t.gold : g_t.bull));
-   double by=y+34.0*k;
-   g_front.Bar(x+pad,by,w-2.0*pad,6.0*k,pct/100.0,XRgb(g_t.border,1.0),XRgb(fill,1.0));
-   g_front.SetFont(XAU_FONT,7.5,FW_NORMAL);
-   g_front.Text(x+pad,by+10.0*k,"Today $"+DoubleToString(used,2),XRgb(g_t.text,0.95),TA_LEFT|TA_TOP);
-   g_front.SetFont(XAU_FONT,7.5,FW_SEMIBOLD);
-   g_front.Text(x+w-pad,by+10.0*k,DoubleToString(pct,0)+"% used",XRgb(fill,1.0),TA_RIGHT|TA_TOP);
 
-   g_front.SetFont(XAU_FONT,7.5,FW_NORMAL);
-   g_front.Text(x+pad,y+h-pad,"ATR("+IntegerToString(InpAtrLen)+") $"+XNum(BufAtr[last],2),XRgb(g_t.text,0.95),
-                TA_LEFT|TA_BOTTOM);
-   double cw=0.0,ch=0.0;
-   g_front.PillSize(regime,7.0,cw,ch);
-   g_front.Pill(x+w-pad-cw*0.5,y+h-pad-ch*0.5,regime,XRgb(regime_rgb,0.20),XRgb(regime_rgb,1.0),XA_CENTER,7.0);
+   g_card.SetFont(XAU_FONT,7.5*sc,FW_SEMIBOLD);
+   g_card.Text(x+pad,y+hh*0.5,"ADR ("+IntegerToString(InpAdrLen)+"D)",XRgb(g_t.muted,1.0),TA_LEFT|TA_VCENTER);
+   g_card.SetFont(XAU_FONT,10.0*sc,FW_BOLD);
+   string head="$"+DoubleToString(adr,2)+(g_mv.collapsed ? "  "+DoubleToString(pct,0)+"%" : "");
+   g_card.Text(x+w-30.0*k,y+hh*0.5,head,XRgb(g_mv.collapsed ? fill : g_t.gold,1.0),TA_RIGHT|TA_VCENTER);
+
+   if(!g_mv.collapsed)
+     {
+      double by=y+hh+4.0*s;
+      g_card.Bar(x+pad,by,w-2.0*pad,6.0*s,pct/100.0,XRgb(g_t.border,1.0),XRgb(fill,1.0));
+      g_card.SetFont(XAU_FONT,7.5*sc,FW_NORMAL);
+      g_card.Text(x+pad,by+10.0*s,"Today $"+DoubleToString(used,2),XRgb(g_t.text,0.95),TA_LEFT|TA_TOP);
+      g_card.SetFont(XAU_FONT,7.5*sc,FW_SEMIBOLD);
+      g_card.Text(x+w-pad,by+10.0*s,DoubleToString(pct,0)+"% used",XRgb(fill,1.0),TA_RIGHT|TA_TOP);
+      g_card.SetFont(XAU_FONT,7.5*sc,FW_NORMAL);
+      g_card.Text(x+pad,y+h-pad,"ATR("+IntegerToString(InpAtrLen)+") $"+XNum(BufAtr[last],2),XRgb(g_t.text,0.95),
+                  TA_LEFT|TA_BOTTOM);
+      double cw=0.0,ch=0.0;
+      g_card.PillSize(regime,7.0*sc,cw,ch);
+      g_card.Pill(x+w-pad-6.0*k-cw*0.5,y+h-pad-ch*0.5,regime,XRgb(regime_rgb,0.20),XRgb(regime_rgb,1.0),XA_CENTER,7.0*sc);
+     }
+   XCardChrome(g_card,g_mv,g_t,x,y,w,h,hh);
+   g_card.Flush();
   }
 
 void Render()
@@ -285,10 +358,19 @@ void Render()
       return;
    if(!XBegin(g_back,"XAU.ADR.back",g_map,true) || !XBegin(g_front,"XAU.ADR.front",g_map,false))
       return;
+   g_ui.Draw(sub);
+   if(g_ui.Hidden())
+     {
+      g_back.Flush();
+      g_front.Flush();
+      g_card.Destroy();
+      ChartRedraw();
+      return;
+     }
    int last=g_total-1;
    double k=g_front.K();
 
-   if(InpShowRegime)
+   if(g_ui.Opt(OPT_REGIME))
      {
       if(ArraySize(g_bg)!=g_total)
          ArrayResize(g_bg,g_total);
@@ -299,12 +381,18 @@ void Render()
       XBackground(g_back,g_map,g_bg);
      }
 
-   XFillSeries(g_back,g_map,BufHi,BufHiIn,XRgb(g_t.bear,0.16),0.25);
-   XFillSeries(g_back,g_map,BufLo,BufLoIn,XRgb(g_t.bull,0.16),0.25);
-   XStrokeSeries(g_front,g_map,BufHi,XRgb(g_t.bear,0.9),1.0,5.0,4.0);
-   XStrokeSeries(g_front,g_map,BufLo,XRgb(g_t.bull,0.9),1.0,5.0,4.0);
+   if(g_ui.Opt(OPT_ZONES))
+     {
+      XFillSeries(g_back,g_map,BufHi,BufHiIn,XRgb(g_t.bear,0.16),0.25);
+      XFillSeries(g_back,g_map,BufLo,BufLoIn,XRgb(g_t.bull,0.16),0.25);
+     }
+   if(g_ui.Opt(OPT_LINES))
+     {
+      XStrokeSeries(g_front,g_map,BufHi,XRgb(g_t.bear,0.9),1.0,5.0,4.0);
+      XStrokeSeries(g_front,g_map,BufLo,XRgb(g_t.bull,0.9),1.0,5.0,4.0);
+     }
 
-   if(InpShowTags && XOk(BufHi[last]) && XOk(BufLo[last]))
+   if(g_ui.Opt(OPT_TAGS) && XOk(BufHi[last]) && XOk(BufLo[last]))
      {
       double x=g_map.X(last)+MathMax(3.0*g_map.spacing,10.0*k);
       XauTag tags[];
@@ -314,8 +402,7 @@ void Render()
       XDrawTags(g_front,tags,n,x,7.5);
      }
 
-   if(InpShowPanel)
-      DrawPanel();
+   DrawPanel();
 
    g_back.Flush();
    g_front.Flush();

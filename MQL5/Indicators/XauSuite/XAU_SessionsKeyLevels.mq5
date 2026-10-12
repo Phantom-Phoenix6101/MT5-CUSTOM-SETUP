@@ -32,6 +32,16 @@
 
 #include <XauSuite/XauSuite.mqh>
 
+//--- legend quick-settings switches
+#define OPT_BOXES  0
+#define OPT_ASIA   1
+#define OPT_LONDON 2
+#define OPT_NY     3
+#define OPT_DAILY  4
+#define OPT_WEEKLY 5
+#define OPT_ROUND  6
+#define OPT_TAGS   7
+
 input group "Sessions"
 input bool              InpShowSessions = true;  // Show session boxes
 input bool              InpShowAsia     = true;  // Asia session
@@ -70,6 +80,8 @@ CXauCanvas g_front;
 CXauMap    g_map;
 CXauGate   g_gate;
 int        g_total=0;
+CXauUI     g_ui;
+double     g_theme_ver=0.0;
 double     g_high[],g_low[];
 
 //+------------------------------------------------------------------+
@@ -101,6 +113,16 @@ int OnInit()
    SetIndexBuffer(21,BufSess,INDICATOR_CALCULATIONS);
    for(int p=0; p<7; p++)
       PlotIndexSetDouble(p,PLOT_EMPTY_VALUE,EMPTY_VALUE);
+   g_ui.Init("XAU Sessions & Key Levels",g_t.blue);
+   g_ui.Add("Session boxes",InpShowSessions);
+   g_ui.Add("Asia",InpShowAsia);
+   g_ui.Add("London",InpShowLondon);
+   g_ui.Add("New York",InpShowNY);
+   g_ui.Add("Daily levels (PDH/PDL/PDC/DO)",InpShowDaily);
+   g_ui.Add("Weekly levels (PWH/PWL/WO)",InpShowWeekly);
+   g_ui.Add("Round levels",InpShowRound);
+   g_ui.Add("Price tags",InpShowTags);
+   ReloadTheme();
    IndicatorSetString(INDICATOR_SHORTNAME,"XAU Sessions & Key Levels");
    IndicatorSetInteger(INDICATOR_DIGITS,_Digits);
    g_gate.Init(150);
@@ -110,6 +132,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_gate.Stop();
+   g_ui.Destroy();
    g_back.Destroy();
    g_front.Destroy();
    ChartRedraw();
@@ -126,8 +149,8 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
    ArrayResize(g_high,rates_total);
    ArrayResize(g_low,rates_total);
    double tf_sec=(double)PeriodSeconds();
-   bool day_on=InpShowDaily && tf_sec<86400.0;
-   bool week_on=InpShowWeekly && tf_sec<604800.0;
+   bool day_on=tf_sec<86400.0;
+   bool week_on=tf_sec<604800.0;
    bool intraday=tf_sec<14400.0;
 
    for(int i=start; i<rates_total; i++)
@@ -226,17 +249,41 @@ int OnCalculate(const int rates_total,const int prev_calculated,const datetime &
 
 void OnTimer()
   {
+   if(XauThemeVersion()!=g_theme_ver)
+     {
+      ReloadTheme();
+      if(InpTheme==XAU_THEME_AUTO)
+         XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
    if(g_gate.Pending())
       Render();
   }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
   {
-   if(id==CHARTEVENT_CHART_CHANGE)
+   int r=g_ui.OnEvent(id,lparam,dparam,sparam);
+   if((r&XUI_THEME)!=0)
+     {
+      ReloadTheme();
+      XauRestyleChart(0,g_t);
+      Render();
+      return;
+     }
+   if((r&XUI_VISUAL)!=0 || id==CHARTEVENT_CHART_CHANGE)
       Render();
   }
 
 //+------------------------------------------------------------------+
+//--- (re)load the theme; also called when the suite theme changes on any chart
+void ReloadTheme()
+  {
+   XauLoadTheme(InpTheme,g_t);
+   g_ui.SetTheme(g_t);
+   g_theme_ver=XauThemeVersion();
+  }
+
 void DrawSessions(const int bit,const string name,const uint rgb,const int min_idx)
   {
    int last=g_total-1;
@@ -290,11 +337,19 @@ void Render()
       return;
    if(!XBegin(g_back,"XAU.Sessions.back",g_map,true) || !XBegin(g_front,"XAU.Sessions.front",g_map,false))
       return;
+   g_ui.Draw(sub);
+   if(g_ui.Hidden())
+     {
+      g_back.Flush();
+      g_front.Flush();
+      ChartRedraw();
+      return;
+     }
    int last=g_total-1;
    double k=g_front.K();
 
    //--- session boxes over the last N trading days
-   if(InpShowSessions && PeriodSeconds()<14400)
+   if(g_ui.Opt(OPT_BOXES) && PeriodSeconds()<14400)
      {
       int min_idx=last;
       long cur=(long)BufKey[last];
@@ -310,28 +365,35 @@ void Render()
            }
          min_idx=i;
         }
-      if(InpShowAsia)
+      if(g_ui.Opt(OPT_ASIA))
          DrawSessions(1,"ASIA",g_t.violet,min_idx);
-      if(InpShowLondon)
+      if(g_ui.Opt(OPT_LONDON))
          DrawSessions(2,"LONDON",g_t.blue,min_idx);
-      if(InpShowNY)
+      if(g_ui.Opt(OPT_NY))
          DrawSessions(4,"NEW YORK",g_t.orange,min_idx);
      }
 
    //--- level lines
-   XStrokeSeries(g_front,g_map,BufPdh,XRgb(g_t.bull,0.95),1.0);
-   XStrokeSeries(g_front,g_map,BufPdl,XRgb(g_t.bear,0.95),1.0);
-   XStrokeSeries(g_front,g_map,BufPdc,XRgb(g_t.silver,0.75),1.0,1.5,2.5);
-   XStrokeSeries(g_front,g_map,BufDOpen,XRgb(g_t.gold,0.95),1.0,5.0,4.0);
-   XStrokeSeries(g_front,g_map,BufPwh,XRgb(g_t.blue,0.95),2.0);
-   XStrokeSeries(g_front,g_map,BufPwl,XRgb(g_t.violet,0.95),2.0);
-   XStrokeSeries(g_front,g_map,BufWOpen,XRgb(g_t.orange,0.95),1.0,5.0,4.0);
+   bool daily=g_ui.Opt(OPT_DAILY),weekly=g_ui.Opt(OPT_WEEKLY);
+   if(daily)
+     {
+      XStrokeSeries(g_front,g_map,BufPdh,XRgb(g_t.bull,0.95),1.0);
+      XStrokeSeries(g_front,g_map,BufPdl,XRgb(g_t.bear,0.95),1.0);
+      XStrokeSeries(g_front,g_map,BufPdc,XRgb(g_t.silver,0.75),1.0,1.5,2.5);
+      XStrokeSeries(g_front,g_map,BufDOpen,XRgb(g_t.gold,0.95),1.0,5.0,4.0);
+     }
+   if(weekly)
+     {
+      XStrokeSeries(g_front,g_map,BufPwh,XRgb(g_t.blue,0.95),2.0);
+      XStrokeSeries(g_front,g_map,BufPwl,XRgb(g_t.violet,0.95),2.0);
+      XStrokeSeries(g_front,g_map,BufWOpen,XRgb(g_t.orange,0.95),1.0,5.0,4.0);
+     }
 
    double x_last=g_map.X(last);
    double x_tag=x_last+MathMax(4.0*g_map.spacing,22.0*k);
 
    //--- extensions + tags for the live levels
-   if(InpShowTags)
+   if(g_ui.Opt(OPT_TAGS))
      {
       XauTag tags[];
       int n=0;
@@ -354,7 +416,7 @@ void Render()
       vals[6]=BufWOpen[last];
       for(int j=0; j<7; j++)
         {
-         if(!XOk(vals[j]))
+         if(!XOk(vals[j]) || (j<4 && !daily) || (j>=4 && !weekly))
             continue;
          double y=g_map.Y(vals[j]);
          g_front.Line(x_last,y,x_tag,y,XRgb(cols[j],0.55),1.0,2.0,2.0);
@@ -365,7 +427,7 @@ void Render()
 
    //--- psychological round numbers around the current price
    double px=iClose(_Symbol,_Period,0);
-   if(InpShowRound && px>0.0 && InpRoundStep>0.0)
+   if(g_ui.Opt(OPT_ROUND) && px>0.0 && InpRoundStep>0.0)
      {
       double base=MathFloor(px/InpRoundStep)*InpRoundStep;
       int left=MathMax(0,last-150);
