@@ -41,7 +41,7 @@ input bool           InpShowSweeps   = true;  // Mark liquidity sweeps
 input bool           InpShowZones    = true;  // Premium / discount zones
 input group "Performance & style"
 input int            InpMaxBars      = 5000;  // Bars to analyse
-input ENUM_XAU_THEME InpTheme        = XAU_THEME_MIDNIGHT; // Colour theme
+input ENUM_XAU_THEME InpTheme        = XAU_THEME_AUTO; // Colour theme
 
 struct SmcZone
   {

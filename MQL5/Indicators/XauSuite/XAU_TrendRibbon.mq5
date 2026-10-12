@@ -53,7 +53,7 @@ input bool           InpShowSignals   = true;  // Show BUY / SELL flips
 input bool           InpShowBarColors = true;  // Colour candles by regime
 input bool           InpGlow          = true;  // Soft glow on the baseline
 input group "Style"
-input ENUM_XAU_THEME InpTheme         = XAU_THEME_MIDNIGHT; // Colour theme
+input ENUM_XAU_THEME InpTheme         = XAU_THEME_AUTO; // Colour theme
 
 //--- plot buffers
 double BufCO[],BufCH[],BufCL[],BufCC[],BufCColor[];

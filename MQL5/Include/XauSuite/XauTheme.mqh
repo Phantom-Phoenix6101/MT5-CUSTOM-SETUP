@@ -7,8 +7,11 @@
 
 #include "XauBase.mqh"
 
+#define XAU_THEME_GV "XAU_SUITE_THEME" // terminal global variable holding the suite theme
+
 enum ENUM_XAU_THEME
   {
+   XAU_THEME_AUTO=-1,    // Suite theme (set by the setup / theme script)
    XAU_THEME_MIDNIGHT=0, // Midnight - mint / rose / gold
    XAU_THEME_AURORA=1,   // Aurora - aqua / magenta / violet
    XAU_THEME_CLASSIC=2,  // Classic - TradingView colours
@@ -39,8 +42,22 @@ struct XauTheme
    uint              grid;
   };
 
-void XauLoadTheme(const ENUM_XAU_THEME id,XauTheme &t)
+//--- AUTO follows the suite-wide theme stored by the setup / theme script (Midnight if never set)
+ENUM_XAU_THEME XauResolveTheme(const ENUM_XAU_THEME id)
   {
+   if(id!=XAU_THEME_AUTO)
+      return(id);
+   if(!GlobalVariableCheck(XAU_THEME_GV))
+      return(XAU_THEME_MIDNIGHT);
+   int v=(int)MathRound(GlobalVariableGet(XAU_THEME_GV));
+   if(v<XAU_THEME_MIDNIGHT || v>XAU_THEME_DAYLIGHT)
+      return(XAU_THEME_MIDNIGHT);
+   return((ENUM_XAU_THEME)v);
+  }
+
+void XauLoadTheme(const ENUM_XAU_THEME requested,XauTheme &t)
+  {
+   ENUM_XAU_THEME id=XauResolveTheme(requested);
    switch(id)
      {
       case XAU_THEME_AURORA:
@@ -128,6 +145,39 @@ void XauLoadTheme(const ENUM_XAU_THEME id,XauTheme &t)
          t.grid=0x161B26;
          break;
      }
+  }
+
+//+------------------------------------------------------------------+
+//| Restyle a chart to match a theme: background, candles, axis, grid |
+//+------------------------------------------------------------------+
+void XauApplyChartTheme(const long chart,const XauTheme &t,const bool grid,const bool hollow_bull,
+                        const bool hide_volume,const bool shift)
+  {
+   ChartSetInteger(chart,CHART_MODE,CHART_CANDLES);
+   ChartSetInteger(chart,CHART_FOREGROUND,false); // keep the canvas front layers above the candles
+   ChartSetInteger(chart,CHART_SHOW_GRID,grid);
+   ChartSetInteger(chart,CHART_COLOR_BACKGROUND,XClr(t.chart_bg));
+   ChartSetInteger(chart,CHART_COLOR_FOREGROUND,XClr(t.chart_fg));
+   ChartSetInteger(chart,CHART_COLOR_GRID,XClr(t.grid));
+   ChartSetInteger(chart,CHART_COLOR_CHART_UP,XClr(t.bull));
+   ChartSetInteger(chart,CHART_COLOR_CHART_DOWN,XClr(t.bear));
+   ChartSetInteger(chart,CHART_COLOR_CANDLE_BULL,hollow_bull ? XClr(t.chart_bg) : XClr(t.bull));
+   ChartSetInteger(chart,CHART_COLOR_CANDLE_BEAR,XClr(t.bear));
+   ChartSetInteger(chart,CHART_COLOR_CHART_LINE,XClr(t.gold));
+   ChartSetInteger(chart,CHART_COLOR_VOLUME,XClr(t.muted));
+   ChartSetInteger(chart,CHART_COLOR_BID,XClr(t.gold));
+   ChartSetInteger(chart,CHART_COLOR_ASK,XClr(t.muted));
+   ChartSetInteger(chart,CHART_COLOR_LAST,XClr(t.text));
+   ChartSetInteger(chart,CHART_COLOR_STOP_LEVEL,XClr(t.bear));
+   if(hide_volume)
+      ChartSetInteger(chart,CHART_SHOW_VOLUMES,CHART_VOLUME_HIDE);
+   ChartSetInteger(chart,CHART_SHIFT,shift);
+   if(shift)
+      ChartSetDouble(chart,CHART_SHIFT_SIZE,12.0);
+   ChartSetInteger(chart,CHART_SHOW_PERIOD_SEP,false);
+   ChartSetInteger(chart,CHART_SHOW_OHLC,true);
+   ChartSetInteger(chart,CHART_SHOW_BID_LINE,true);
+   ChartRedraw(chart);
   }
 
 #endif

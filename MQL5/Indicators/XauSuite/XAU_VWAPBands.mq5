@@ -55,7 +55,7 @@ input ENUM_XAU_DAY_ROLL      InpDayRoll   = XAU_ROLL_NY17; // Trading day starts
 input double                 InpServerGMT = 99;    // Server GMT offset, hours (99 = auto-detect)
 input ENUM_XAU_DST           InpServerDST = XAU_DST_US; // Server daylight-saving rule
 input group "Style"
-input ENUM_XAU_THEME         InpTheme     = XAU_THEME_MIDNIGHT; // Colour theme
+input ENUM_XAU_THEME         InpTheme     = XAU_THEME_AUTO; // Colour theme
 
 double BufVwap[],BufU1[],BufL1[],BufU2[],BufL2[],BufU3[],BufL3[],BufPrev[];
 double BufSPV[],BufSPPV[],BufSV[],BufSP[],BufSPP[],BufCnt[],BufPrevRaw[],BufRaw[],BufKey[];

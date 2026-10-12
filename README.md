@@ -32,6 +32,7 @@ MT5 draws indicator plots with aliased 1-pixel GDI lines. Every indicator here i
 | `XAU_ADRVolatility` | ADR high / low targets (dynamic or from open) with exhaustion zones, squeeze / expansion regime background, ADR usage card with progress bar |
 | `XAU_IntermarketRadar` | Rolling correlation of gold vs DXY and vs silver, gold/silver ratio z-score, read-out card (separate window). Detects broker symbols automatically (prefix/suffix aware) and synthesises DXY from the six ICE basket pairs if your broker has no dollar index |
 | `XAU_CommandCenter` | Dashboard: 4-timeframe trend / RSI / ADX matrix, weighted bias verdict with gauge, session, day change, ADR usage, position in day range, PDH / PDL distance, ATR regime, plain-language read |
+| `Scripts/XAU_OneClickSetup` | Builds the whole workspace in one click (see below) |
 | `Scripts/XAU_ChartTheme` | Restyles the chart (background, candles, grid, axis) to match a theme |
 
 ## Themes
@@ -43,7 +44,8 @@ Every indicator has a **Colour theme** input:
 - **Classic**: TradingView's own colours
 - **Daylight**: tuned for white charts
 
-Run `XAU_ChartTheme` with the same theme so the chart background and candles match. Then save it as a
+Indicators default to **Suite theme**, which follows the last theme chosen in `XAU_OneClickSetup` or
+`XAU_ChartTheme`. Those scripts also restyle the chart background and candles to match. Then save it as a
 template (*Charts → Templates → Save Template*).
 
 ## Install
@@ -54,6 +56,32 @@ template (*Charts → Templates → Save Template*).
 3. Open **MetaEditor** (F4), right-click `Indicators/XauSuite` → **Compile**, then do the same for
    `Scripts/XauSuite`.
 4. In the terminal's Navigator, refresh, then drag indicators onto an XAUUSD chart.
+
+## One-click setup
+
+After compiling, drag **Scripts → XauSuite → XAU_OneClickSetup** onto any chart, pick a theme and press OK.
+The script finds your broker's gold symbol (including suffixes such as `XAUUSD.m`), then opens and styles:
+
+| Chart | Purpose | Indicators |
+|---|---|---|
+| XAUUSD **D1** | Bias | Trend Ribbon, Smart Money Concepts |
+| XAUUSD **H4** | Structure | Smart Money Concepts, Volume Profile, Sessions & Key Levels |
+| XAUUSD **H1** | Plan | Sessions & Key Levels, VWAP Bands, Command Center, Intermarket Radar (sub-window) |
+| XAUUSD **M15** | Execution | Trend Ribbon, Sessions & Key Levels, VWAP Bands, ADR & Volatility, Command Center, Momentum Matrix (sub-window) |
+| DXY / XAGUSD **H1** | Context | Trend Ribbon (when your broker offers them) |
+
+Other options:
+
+- **What to set up**: instead of opening new charts, add only the Execution, Plan or Structure set to the
+  current chart.
+- **Close all other charts first**: start from a clean workspace.
+- **Gold symbol**: set this if auto-detection picks the wrong symbol.
+
+When it finishes, use *Window → Tile Windows* (Alt+R), then *File → Profiles → Save As* to keep the
+workspace.
+
+All indicators default to **Suite theme**, so the theme chosen in the setup (or `XAU_ChartTheme`) script
+applies to every indicator. Pick a fixed theme in an indicator's inputs to override it.
 
 ## Time settings
 

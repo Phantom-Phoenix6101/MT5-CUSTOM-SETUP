@@ -36,7 +36,7 @@ input int            InpRatioLen     = 100;  // Gold/silver ratio z-score length
 input int            InpMaxBars      = 3000; // Bars to analyse
 input bool           InpShowPanel    = true; // Show intermarket read-out
 input group "Style"
-input ENUM_XAU_THEME InpTheme        = XAU_THEME_MIDNIGHT; // Colour theme
+input ENUM_XAU_THEME InpTheme        = XAU_THEME_AUTO; // Colour theme
 
 double BufZ[],BufDxyCorr[],BufXagCorr[];
 double BufGoldRet[],BufDxyRet[],BufXagRet[],BufRatio[],BufDxy[],BufXag[];

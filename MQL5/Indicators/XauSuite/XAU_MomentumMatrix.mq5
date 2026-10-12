@@ -47,7 +47,7 @@ input bool               InpShowHidden = true;  // Show hidden divergences
 input bool               InpDivLines   = true;  // Draw divergence lines
 input group "Style"
 input bool               InpGlow       = true;  // Soft glow on the RSI
-input ENUM_XAU_THEME     InpTheme      = XAU_THEME_MIDNIGHT; // Colour theme
+input ENUM_XAU_THEME     InpTheme      = XAU_THEME_AUTO; // Colour theme
 
 double BufHist[],BufRsi[],BufSignal[],BufBull[],BufBear[];
 double BufGain[],BufLoss[],BufMFast[],BufMSlow[],BufMSig[],BufHistRaw[];

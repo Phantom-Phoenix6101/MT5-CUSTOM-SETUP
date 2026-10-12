@@ -39,7 +39,7 @@ input group "Layout & style"
 input ENUM_XAU_CORNER   InpCorner    = XAU_CORNER_TR; // Dashboard position
 input int               InpFontSize  = 11;   // Size (11 = default)
 input int               InpMargin    = 12;   // Distance from the chart edge (px)
-input ENUM_XAU_THEME    InpTheme     = XAU_THEME_MIDNIGHT; // Colour theme
+input ENUM_XAU_THEME    InpTheme     = XAU_THEME_AUTO; // Colour theme
 
 double BufKey[],BufDHigh[],BufDLow[],BufDOpen[],BufOrd[],BufPHigh[],BufPLow[],BufGain[],BufLoss[],BufRsi[],BufAtr[];
 
